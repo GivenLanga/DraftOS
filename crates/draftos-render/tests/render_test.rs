@@ -46,6 +46,7 @@ fn sample_doc() -> LirDocument {
                 ],
             },
         ],
+        children: Vec::new(),
         cross_refs: Vec::new(),
         defined_terms_used: vec!["Confidential Information".into()],
         provenance: Provenance::default(),

@@ -7,6 +7,8 @@ use draftos_retrieval::{expand_hits, search, Filters};
 
 fn extracted(kind: ClauseKind, heading: Option<&str>, term: Option<&str>, body: &str) -> ExtractedClause {
     ExtractedClause {
+        seq: 0,
+        depth: 0,
         kind,
         number: None,
         heading: heading.map(str::to_string),
@@ -54,7 +56,7 @@ fn expansion_pulls_referenced_definitions() {
         ),
     ];
     let embeddings: Vec<Vec<f32>> = clauses.iter().map(|c| embedder.embed_one(&c.body).unwrap()).collect();
-    bundle.upsert_document("spa.txt", "h1", &clauses, &embeddings).unwrap();
+    bundle.upsert_document("spa.txt", "h1", &draftos_index::DocumentMeta::default(), &clauses, &embeddings).unwrap();
 
     let bundles = vec![bundle];
     let hits = search(

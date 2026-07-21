@@ -5,7 +5,7 @@
 mod metadata;
 mod split;
 
-pub use metadata::classify_clause_type;
+pub use metadata::{classify_clause_type, detect_contract_type, normalize_label};
 
 use draftos_core::{ClauseKind, ClauseMetadata, ExtractedClause, ParsedDocument};
 
@@ -39,6 +39,10 @@ pub fn extract(doc: &ParsedDocument, rel_path: &str) -> Vec<ExtractedClause> {
                 definitions.push(ExtractedClause {
                     kind: ClauseKind::Definition,
                     number: None,
+                    // Definitions are addressed by term, not position; they keep
+                    // their defining clause's seq so provenance stays ordered.
+                    seq: clause.seq,
+                    depth: 0,
                     heading: None,
                     term: Some(term),
                     body: sentence,
@@ -68,6 +72,10 @@ pub fn extract(doc: &ParsedDocument, rel_path: &str) -> Vec<ExtractedClause> {
     }
 
     // Drop noise: fragments too short to be a meaningful knowledge object.
-    clauses.retain(|c| c.body.len() >= 40 || c.kind == ClauseKind::Definition);
+    // A heading-only node is kept — it is the parent of its sub-clauses, and
+    // dropping it would orphan the whole subtree.
+    clauses.retain(|c| {
+        c.body.len() >= 40 || c.kind == ClauseKind::Definition || c.heading.is_some()
+    });
     clauses
 }

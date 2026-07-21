@@ -1,12 +1,18 @@
 //! Clause segmentation heuristics.
+//!
+//! Output is a flat list in document order, where every object carries its
+//! `seq` (position) and `depth` (nesting implied by its number). The assembler
+//! rebuilds the tree from those two fields, so a precedent's structure —
+//! "5", "5.1", "5.1.2" — survives ingestion instead of collapsing into one
+//! run-on paragraph.
 
 use draftos_core::{ClauseKind, ClauseMetadata, ExtractedClause, ParsedDocument};
 use regex::Regex;
 use std::sync::OnceLock;
 
-fn numbered_heading_re() -> &'static Regex {
+fn leading_number_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    // "12. Termination", "12.3 Notice of Breach", "12)" — number + short title.
+    // "12. ", "12.3 ", "12.3.1) " followed by the rest of the paragraph.
     RE.get_or_init(|| Regex::new(r"^(\d{1,3}(?:\.\d{1,3})*)[.)]?\s+(.+)$").unwrap())
 }
 
@@ -29,39 +35,30 @@ fn definition_re() -> &'static Regex {
 struct Builder {
     kind: ClauseKind,
     number: Option<String>,
+    depth: u8,
     heading: Option<String>,
-    /// Original OOXML of the heading paragraph (DOCX), so the renderer can
-    /// reproduce the source heading and the numbering it carries.
     heading_ooxml: Option<String>,
     body: Vec<String>,
-    /// Original OOXML for each body paragraph (DOCX sources), parallel to the
-    /// text collected in `body`. Empty for non-DOCX.
     body_ooxml: Vec<String>,
 }
 
 impl Builder {
-    /// Start a clause whose heading is `para` (its text already extracted).
-    fn heading(kind: ClauseKind, number: Option<String>, heading: String, para: &draftos_core::Paragraph) -> Self {
+    fn new(kind: ClauseKind, number: Option<String>, depth: u8) -> Self {
         Builder {
             kind,
             number,
-            heading: Some(heading),
-            heading_ooxml: para.ooxml.clone(),
-            body: Vec::new(),
-            body_ooxml: Vec::new(),
-        }
-    }
-
-    /// Start a headingless clause (e.g. the preamble before the first heading).
-    fn headless(kind: ClauseKind) -> Self {
-        Builder {
-            kind,
-            number: None,
+            depth,
             heading: None,
             heading_ooxml: None,
             body: Vec::new(),
             body_ooxml: Vec::new(),
         }
+    }
+
+    fn with_heading(mut self, heading: String, para: &draftos_core::Paragraph) -> Self {
+        self.heading = Some(heading);
+        self.heading_ooxml = para.ooxml.clone();
+        self
     }
 
     fn push_body(&mut self, para: &draftos_core::Paragraph, text: &str) {
@@ -71,14 +68,18 @@ impl Builder {
         }
     }
 
-    fn finish(self) -> Option<ExtractedClause> {
+    fn finish(self, seq: usize) -> Option<ExtractedClause> {
         let body = self.body.join("\n");
+        // A heading-only parent (its text lives in its sub-clauses) is still a
+        // real node — dropping it would orphan the whole subtree.
         if body.trim().is_empty() && self.heading.is_none() {
             return None;
         }
         Some(ExtractedClause {
             kind: self.kind,
             number: self.number,
+            seq,
+            depth: self.depth,
             heading: self.heading,
             term: None,
             body,
@@ -93,6 +94,18 @@ pub fn split_into_clauses(doc: &ParsedDocument) -> Vec<ExtractedClause> {
     let mut out: Vec<ExtractedClause> = Vec::new();
     let mut current: Option<Builder> = None;
     let mut in_schedule = false;
+    let mut seen_numbered = false;
+    // The kind of the section currently open. Sub-clauses inherit it rather
+    // than being re-classified from their own prose — a clause that happens to
+    // mention "signed by both parties" is not a signature block.
+    let mut section_kind = ClauseKind::Recital;
+
+    let flush = |current: &mut Option<Builder>, out: &mut Vec<ExtractedClause>| {
+        if let Some(b) = current.take() {
+            let seq = out.len();
+            out.extend(b.finish(seq));
+        }
+    };
 
     for para in &doc.paragraphs {
         let text = para.text.trim();
@@ -100,88 +113,102 @@ pub fn split_into_clauses(doc: &ParsedDocument) -> Vec<ExtractedClause> {
             continue;
         }
 
-        let schedule_start = schedule_re().is_match(text) && text.len() <= 80;
-        let heading_info = detect_heading(text, para.heading_level);
-
-        if schedule_start {
-            if let Some(b) = current.take() {
-                out.extend(b.finish());
-            }
+        if schedule_re().is_match(text) && text.len() <= 80 {
+            flush(&mut current, &mut out);
             in_schedule = true;
-            current = Some(Builder::heading(
-                ClauseKind::Schedule,
-                None,
-                text.to_string(),
-                para,
-            ));
-        } else if let Some((number, heading)) = heading_info {
-            if let Some(b) = current.take() {
-                out.extend(b.finish());
-            }
-            let kind = if in_schedule {
-                ClauseKind::Schedule
-            } else if is_execution_heading(&heading) {
-                ClauseKind::Execution
-            } else if is_recital_heading(&heading) {
-                ClauseKind::Recital
-            } else {
-                ClauseKind::Clause
-            };
-            current = Some(Builder::heading(kind, number, heading, para));
-        } else {
-            match &mut current {
-                Some(b) => b.push_body(para, text),
-                None => {
-                    // Preamble before the first heading (title page, parties).
-                    let mut b = Builder::headless(ClauseKind::Recital);
-                    b.push_body(para, text);
-                    current = Some(b);
+            section_kind = ClauseKind::Schedule;
+            current = Some(
+                Builder::new(ClauseKind::Schedule, None, 0).with_heading(text.to_string(), para),
+            );
+            continue;
+        }
+
+        // A leading number path starts a new node at the depth it implies.
+        if let Some(caps) = leading_number_re().captures(text) {
+            let path = caps[1].to_string();
+            let rest = caps[2].trim().to_string();
+            let depth = path.matches('.').count().min(u8::MAX as usize) as u8;
+            flush(&mut current, &mut out);
+            seen_numbered = true;
+            let heading = is_heading_text(&rest).then(|| rest.clone());
+            // Only a heading may re-open a section; a numbered body paragraph
+            // stays inside the section it belongs to.
+            let kind = match (&heading, depth) {
+                (Some(h), _) => {
+                    section_kind = node_kind(in_schedule, h, seen_numbered);
+                    section_kind
                 }
+                (None, 0) => {
+                    section_kind = node_kind(in_schedule, "", seen_numbered);
+                    section_kind
+                }
+                (None, _) => section_kind,
+            };
+            let mut b = Builder::new(kind, Some(path), depth);
+            match heading {
+                Some(h) => b = b.with_heading(h, para),
+                // A numbered sub-clause: the text after the number is its body.
+                None => b.push_body(para, &rest),
+            }
+            current = Some(b);
+            continue;
+        }
+
+        // Unnumbered heading: a declared heading style, or a short ALL-CAPS line.
+        if is_unnumbered_heading(text, para.heading_level) {
+            flush(&mut current, &mut out);
+            section_kind = node_kind(in_schedule, text, seen_numbered);
+            current = Some(Builder::new(section_kind, None, 0).with_heading(text.to_string(), para));
+            continue;
+        }
+
+        match &mut current {
+            Some(b) => b.push_body(para, text),
+            None => {
+                // Preamble before anything else (title page, parties block).
+                let mut b = Builder::new(ClauseKind::Recital, None, 0);
+                b.push_body(para, text);
+                current = Some(b);
             }
         }
     }
-    if let Some(b) = current.take() {
-        out.extend(b.finish());
-    }
+    flush(&mut current, &mut out);
     out
 }
 
-/// Returns Some((number, heading_text)) when the paragraph reads as a heading.
-fn detect_heading(text: &str, declared_level: Option<u8>) -> Option<(Option<String>, String)> {
-    if declared_level.is_some() && text.len() <= 120 {
-        let (num, rest) = split_leading_number(text);
-        return Some((num, rest));
+/// What kind of node a heading starts. Anything before the first numbered
+/// clause is front matter (title, parties, recitals) rather than an operative
+/// clause — that is what keeps the document title out of the clause list.
+fn node_kind(in_schedule: bool, heading: &str, seen_numbered: bool) -> ClauseKind {
+    if in_schedule {
+        ClauseKind::Schedule
+    } else if is_execution_heading(heading) {
+        ClauseKind::Execution
+    } else if is_recital_heading(heading) || !seen_numbered {
+        ClauseKind::Recital
+    } else {
+        ClauseKind::Clause
     }
-    // ALL-CAPS short line, e.g. "TERMINATION".
-    if text.len() <= 60
+}
+
+/// Whether the text after a clause number reads as a heading rather than the
+/// clause's own body ("Termination" vs "The Customer shall pay…").
+fn is_heading_text(text: &str) -> bool {
+    text.len() <= 90
+        && !text.ends_with(['.', ';', ':', ','])
+        && text.split_whitespace().count() <= 10
+}
+
+fn is_unnumbered_heading(text: &str, declared_level: Option<u8>) -> bool {
+    if declared_level.is_some() && text.len() <= 120 {
+        return true;
+    }
+    text.len() <= 60
         && text.chars().any(|c| c.is_alphabetic())
         && text
             .chars()
             .filter(|c| c.is_alphabetic())
             .all(|c| c.is_uppercase())
-    {
-        let (num, rest) = split_leading_number(text);
-        return Some((num, rest));
-    }
-    // Numbered short line: "12. Termination".
-    if text.len() <= 90 && !text.ends_with(['.', ';', ':', ',']) {
-        if let Some(caps) = numbered_heading_re().captures(text) {
-            let title = caps[2].trim().to_string();
-            let words = title.split_whitespace().count();
-            if words <= 10 {
-                return Some((Some(caps[1].to_string()), title));
-            }
-        }
-    }
-    None
-}
-
-fn split_leading_number(text: &str) -> (Option<String>, String) {
-    if let Some(caps) = numbered_heading_re().captures(text) {
-        (Some(caps[1].to_string()), caps[2].trim().to_string())
-    } else {
-        (None, text.to_string())
-    }
 }
 
 fn is_execution_heading(heading: &str) -> bool {

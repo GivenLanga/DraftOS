@@ -3,6 +3,89 @@
 Deviations from `CLAUDE.md` and notable implementation decisions, newest first.
 Each entry: date, decision, reason, alternative considered.
 
+## 2026-07-21 — Drafting is precedent-led: the corpus supplies the structure
+
+The drafting pipeline reproduced almost nothing of the precedents it was given.
+Measured on an ordinary 15-clause service agreement: **15 clauses in, 8 out; 2
+schedules in, 0 out; 3 definitions in, 1 out** — and the assembly report said
+`missing: []`. Root cause: the document's skeleton came from a `const` table in
+`draftos-rules` (6 contract types, 18 clause-type labels) compiled into the
+binary. The corpus was then queried only for those labels, one clause per label.
+So the ceiling on document size was the size of the table, the operative heart of
+any agreement (Appointment, Service Levels, Service Credits…) was unreachable
+because it fell outside the fixed vocabulary, and pointing DraftOS at a new legal
+corpus changed nothing about what it produced. Prior work on rendering fidelity
+(style donor, OOXML lifting, numbering — the three entries below) was making a
+gutted document *look* like the precedent.
+
+**The inversion.** Structure now comes from a precedent in the user's own
+sources. `assemble` picks the best-matching indexed document as a *skeleton*,
+rebuilds its clause tree, and follows it: its clause order, its nesting, its
+definitions, its schedules, its recitals. `draftos-rules` is demoted from
+generator to **checklist** — it audits the assembled document, reports required
+clause types the precedent lacked, and decides where to insert one if a
+precedent for it exists elsewhere. An unknown contract type now yields an *empty*
+checklist (nothing to audit), not a generic skeleton; that single change is what
+makes a charterparty corpus draft charterparties.
+
+Supporting changes, each of which was independently load-bearing:
+
+- **Corpus-derived vocabulary.** `classify_clause_type` prefers a canonical
+  synonym family, then falls back to the precedent's own heading as the label.
+  The keyword tables became a canonicalisation layer, not the vocabulary. A
+  clause is never unaddressable for falling outside a fixed list.
+- **Hierarchy survives ingestion.** `ExtractedClause`/`ClauseHit` carry `seq`
+  and `depth`; the index stores them; `LirClause` gained `children`. Sub-clauses
+  5.1/5.2/5.3 used to be stripped of their numbers and merged into one run-on
+  paragraph.
+- **Cross-reference remapping.** Assembly builds an old→new number map while
+  renumbering and rewrites references in both body text and lifted `<w:t>` OOXML
+  (best-effort in OOXML — a reference split across runs still won't match, and
+  validation now catches it). A dangling reference is an **error**, not a
+  warning: assembly had its chance to remap it, so anything left says something
+  untrue about the document.
+- **Word-boundary keyword matching.** Substring matching had "nda" matching
+  inside *Su**nda**y*, "spa" inside *spacing*, "moi" inside *domicilium* —
+  silently mislabelling entire documents. Found by end-to-end testing, not
+  review.
+- **Plain-text/PDF paragraph splitting.** The TXT/PDF parser joined every
+  consecutive non-blank line, fusing a whole contract into four paragraphs
+  before extraction ever saw it. Lines now break on structural cues (clause
+  number, heading, schedule marker, defined term) and after a heading; genuine
+  hard wrapping still joins.
+- **Front matter is rebuilt, not copied.** Carrying a precedent's title/parties
+  block through verbatim put the *previous deal's* parties in the new document.
+  Only substantive recitals (labelled, or containing "whereas") carry through;
+  the parties block is rebuilt from the MatterSpec. Backed by a new deterministic
+  check, `foreign-party-name`: any company-suffixed name in the draft that is not
+  a party is flagged.
+- **`approved` is now honoured** (CLAUDE.md §7) — it had never been read.
+  `Filters` gained `approved_only` and a rank boost, plus `exclude_kinds` so
+  retrieving an operative clause can never return schedule or signature text.
+- **The desktop contract-type dropdown** lists the types actually present in the
+  attached sources, with precedent counts, instead of six hardcoded strings.
+
+Alternative considered: keep the template-driven assembler and grow the tables.
+Rejected — it is unbounded work that still fails on the first unfamiliar corpus,
+which is precisely the product requirement (CLAUDE.md §5).
+
+Schema note: `clauses` gained `seq`/`depth` and `documents` gained
+`contract_type`/`jurisdiction`/`title`, via guarded `ALTER TABLE`. Bundles
+indexed before this change still *search* fine but cannot supply a skeleton;
+`SourceBundle::needs_rebuild` detects them and assembly reports a note asking for
+a rescan.
+
+`draftos-assemble` previously had **no tests at all**. It now has 13 covering
+each guarantee above, plus new coverage in extract, parse and validate.
+
+Known limitation, deliberately not addressed here: `HashEmbedder` is still
+lexical (feature-hashed unigrams + char trigrams), so the "vector" half of hybrid
+retrieval adds little over BM25. This mattered far more under the old design,
+where every clause was fetched by a semantic-ish query; structure now comes from
+a document the user's corpus already contains, and retrieval is used only for
+checklist gap-filling. Wiring `fastembed` behind a cargo feature remains the
+right fix and is a self-contained change.
+
 ## 2026-07-21 — Follow the precedent's numbering scheme, don't synthesise decimals
 The previous pass stripped source `<w:numPr>` and applied DraftOS's own "1. 2.
 3." — itself a hardcode, ignoring that each pack defines its own scheme

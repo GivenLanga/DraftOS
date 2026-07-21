@@ -93,6 +93,15 @@ fn ingest_file(
     let parsed = draftos_parse::parse_file(path)?;
     let clauses = draftos_extract::extract(&parsed, rel_path);
 
+    // Document-level metadata, so this precedent can later be chosen as a
+    // drafting skeleton. Taken from the clauses' own inferred metadata (they all
+    // share the document's contract type) plus the document's first heading.
+    let meta = draftos_index::DocumentMeta {
+        contract_type: clauses.iter().find_map(|c| c.metadata.contract_type.clone()),
+        jurisdiction: clauses.iter().find_map(|c| c.metadata.jurisdiction.clone()),
+        title: document_title(&parsed),
+    };
+
     let texts: Vec<String> = clauses
         .iter()
         .map(|c| {
@@ -110,8 +119,18 @@ fn ingest_file(
         .map_err(|e| draftos_core::CoreError::Embedding(e.to_string()))?;
 
     let n = clauses.len();
-    bundle.upsert_document(rel_path, &hash, &clauses, &embeddings)?;
+    bundle.upsert_document(rel_path, &hash, &meta, &clauses, &embeddings)?;
     Ok(FileOutcome::Indexed(n))
+}
+
+/// The precedent's own title: the first substantial line of the document.
+fn document_title(parsed: &draftos_core::ParsedDocument) -> Option<String> {
+    parsed
+        .paragraphs
+        .iter()
+        .map(|p| p.text.trim())
+        .find(|t| t.len() >= 4 && t.len() <= 120)
+        .map(draftos_extract::normalize_label)
 }
 
 /// Watch the source's folder and rescan on changes. Blocks the calling thread;

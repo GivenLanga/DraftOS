@@ -172,36 +172,23 @@ fn build_document_xml(doc: &LirDocument, donor: Option<&StyleDonor>) -> String {
     }
 
     for c in &doc.clauses {
-        // Heading: reproduce the precedent's own heading paragraph (with its
-        // numbering) when we have it; otherwise synthesise one — joined into the
-        // donor's list so it numbers in the pack's own scheme, not a hardcode.
-        match (styled, donor) {
-            (true, Some(d)) if c.heading_ooxml.is_some() => {
-                body.push_str(&prepare_source_paragraph(c.heading_ooxml.as_deref().unwrap(), d));
-            }
-            (true, Some(d)) => {
-                body.push_str(&synth_heading(&c.heading, d.main_num_id.as_deref()));
-            }
-            _ => body.push_str(&heading(
-                &format!("{}. {}", c.number, c.heading),
-                HeadingKind::Section,
-                styled,
-            )),
-        }
-        // Body: the precedent's own paragraphs (house style + numbering) when we
-        // have them and a donor is active; otherwise synthesise from plain text.
-        if let (true, Some(d), false) = (styled, donor, c.source_ooxml.is_empty()) {
-            for p in &c.source_ooxml {
-                body.push_str(&prepare_source_paragraph(p, d));
-            }
-        } else {
-            body.push_str(&blocks_xml(&c.body, styled));
-        }
+        clause_xml(&mut body, c, styled, donor);
     }
 
     for s in &doc.schedules {
-        body.push_str(&heading(&s.title, HeadingKind::Section, styled));
-        body.push_str(&blocks_xml(&s.body, styled));
+        match (styled, donor) {
+            (true, Some(d)) if s.heading_ooxml.is_some() => {
+                body.push_str(&prepare_source_paragraph(s.heading_ooxml.as_deref().unwrap(), d));
+            }
+            _ => body.push_str(&heading(&s.title, HeadingKind::Section, styled)),
+        }
+        if let (true, Some(d), false) = (styled, donor, s.source_ooxml.is_empty()) {
+            for p in &s.source_ooxml {
+                body.push_str(&prepare_source_paragraph(p, d));
+            }
+        } else {
+            body.push_str(&blocks_xml(&s.body, styled));
+        }
     }
 
     if !doc.execution.blocks.is_empty() {
@@ -236,6 +223,48 @@ fn build_document_xml(doc: &LirDocument, donor: Option<&StyleDonor>) -> String {
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document {attrs}><w:body>{body}</w:body></w:document>"#
     )
+}
+
+/// One clause and, recursively, its sub-clauses. A sub-clause is emitted in its
+/// own right — with the precedent's own paragraph formatting where we have it —
+/// rather than being folded into the parent's body.
+fn clause_xml(body: &mut String, c: &LirClause, styled: bool, donor: Option<&StyleDonor>) {
+    // Heading: reproduce the precedent's own heading paragraph (with its
+    // numbering) when we have it; otherwise synthesise one — joined into the
+    // donor's list so it numbers in the pack's own scheme, not a hardcode.
+    // Sub-clauses commonly have no heading at all; they get none here either.
+    match (styled, donor) {
+        (true, Some(d)) if c.heading_ooxml.is_some() => {
+            body.push_str(&prepare_source_paragraph(c.heading_ooxml.as_deref().unwrap(), d));
+        }
+        (true, Some(d)) if !c.heading.trim().is_empty() => {
+            body.push_str(&synth_heading(&c.heading, d.main_num_id.as_deref()));
+        }
+        (true, Some(_)) => {}
+        _ => {
+            if c.heading.trim().is_empty() {
+                body.push_str(&heading(&format!("{}.", c.number), HeadingKind::Section, styled));
+            } else {
+                body.push_str(&heading(
+                    &format!("{}. {}", c.number, c.heading),
+                    HeadingKind::Section,
+                    styled,
+                ));
+            }
+        }
+    }
+    // Body: the precedent's own paragraphs (house style + numbering) when we
+    // have them and a donor is active; otherwise synthesise from plain text.
+    if let (true, Some(d), false) = (styled, donor, c.source_ooxml.is_empty()) {
+        for p in &c.source_ooxml {
+            body.push_str(&prepare_source_paragraph(p, d));
+        }
+    } else {
+        body.push_str(&blocks_xml(&c.body, styled));
+    }
+    for child in &c.children {
+        clause_xml(body, child, styled, donor);
+    }
 }
 
 /// Prepare a lifted source paragraph for a new document. Keeps everything that

@@ -320,6 +320,7 @@ async fn search_clauses(
         kind: kind.filter(|k| !k.is_empty()).map(|k| ClauseKind::parse(&k)),
         clause_type: clause_type.filter(|s| !s.is_empty()),
         contract_type: contract_type.filter(|s| !s.is_empty()),
+        ..Filters::default()
     };
     let e = embedder();
     let hits = draftos_retrieval::search(&bundles, &e, &query, &filters, limit.unwrap_or(20))
@@ -551,32 +552,47 @@ async fn ask_assistant(
 
 // ---------- Drafting (Phase 2, surfaced in the desktop) ----------
 
-/// The contract types with hand-written rules (draftos-rules). Anything else is
-/// still draftable — the assembler falls back to a generic clause order.
-const KNOWN_CONTRACT_TYPES: &[&str] = &[
-    "Non-Disclosure Agreement",
-    "Share Purchase Agreement",
-    "Loan Agreement",
-    "Employment Agreement",
-    "Service Agreement",
-    "Lease Agreement",
-];
-
 #[derive(Serialize, Clone)]
 struct ContractTypeInfo {
     contract_type: String,
+    /// Precedents of this type across the attached sources.
+    precedents: usize,
+    /// Clause types the checklist expects, when one exists for this type.
+    /// Empty means "no checklist" — the precedent's own structure stands.
     required: Vec<String>,
 }
 
+/// The contract types DraftOS can draft: whatever the attached sources actually
+/// contain. Nothing is hardcoded — point DraftOS at a corpus of charterparties
+/// and charterparties are what it offers.
 #[tauri::command]
-fn draft_contract_types() -> Vec<ContractTypeInfo> {
-    KNOWN_CONTRACT_TYPES
-        .iter()
-        .map(|ct| ContractTypeInfo {
-            contract_type: ct.to_string(),
-            required: draftos_rules::required_clause_types(ct),
+fn draft_contract_types(state: State<'_, AppState>) -> Result<Vec<ContractTypeInfo>, String> {
+    let records = state.db.lock().unwrap().list_sources().map_err(err_str)?;
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for rec in records.iter().filter(|r| r.attached) {
+        let Ok(bundle) = SourceBundle::open(&rec.bundle_dir) else {
+            continue;
+        };
+        for d in bundle.list_documents().map_err(err_str)? {
+            if d.clause_count == 0 {
+                continue;
+            }
+            if let Some(ct) = d.contract_type {
+                *counts.entry(ct).or_default() += 1;
+            }
+        }
+    }
+    let mut out: Vec<ContractTypeInfo> = counts
+        .into_iter()
+        .map(|(contract_type, precedents)| ContractTypeInfo {
+            required: draftos_rules::required_clause_types(&contract_type),
+            contract_type,
+            precedents,
         })
-        .collect()
+        .collect();
+    // Most-represented types first — those draft best.
+    out.sort_by(|a, b| b.precedents.cmp(&a.precedents).then(a.contract_type.cmp(&b.contract_type)));
+    Ok(out)
 }
 
 #[derive(Serialize, Clone)]
@@ -597,6 +613,9 @@ struct VarView {
 struct ClausePreview {
     number: String,
     heading: String,
+    /// Nesting level, so the UI can indent sub-clauses instead of showing a
+    /// flat list that misrepresents the document's structure.
+    depth: usize,
     source: Option<String>,
     file: Option<String>,
     adapted: bool,
@@ -614,14 +633,32 @@ struct FilledView {
 struct DraftPreview {
     title: String,
     contract_type: String,
+    /// The precedent whose structure this draft follows.
+    skeleton: Option<SkeletonView>,
     clauses: Vec<ClausePreview>,
-    filled: Vec<FilledView>,
+    /// Clauses the checklist flagged as absent and that were filled in from
+    /// another precedent.
+    gap_filled: Vec<FilledView>,
     missing: Vec<String>,
+    excluded: Vec<String>,
+    schedules: Vec<String>,
+    definitions: Vec<String>,
+    notes: Vec<String>,
     variables: Vec<VarView>,
     errors: Vec<FindingView>,
     warnings: Vec<FindingView>,
     /// True when validation found no errors — the only state that may render.
     renderable: bool,
+}
+
+#[derive(Serialize, Clone)]
+struct SkeletonView {
+    source: String,
+    file: String,
+    title: Option<String>,
+    contract_type: Option<String>,
+    exact_type_match: bool,
+    clause_count: usize,
 }
 
 fn finding_view(f: &draftos_validate::Finding) -> FindingView {
@@ -672,7 +709,7 @@ fn collect_variables(doc: &draftos_core::LirDocument) -> Vec<VarView> {
             }
         }
     };
-    for c in &doc.clauses {
+    for c in doc.walk_clauses() {
         walk_blocks(&c.body, &mut visit);
     }
     for d in &doc.definitions {
@@ -737,21 +774,13 @@ fn build_preview(spec: draftos_core::MatterSpec, records: Vec<SourceRecord>) -> 
     let doc = &draft.document;
     let report = draftos_validate::validate(doc);
 
-    let clauses = doc
-        .clauses
-        .iter()
-        .map(|c| ClausePreview {
-            number: c.number.clone(),
-            heading: c.heading.clone(),
-            source: c.provenance.source.clone(),
-            file: c.provenance.file.clone(),
-            adapted: c.provenance.adapted_by_model,
-            snippet: clause_snippet(c),
-        })
-        .collect();
-    let filled = draft
+    let mut clauses = Vec::new();
+    for c in &doc.clauses {
+        push_clause_preview(&mut clauses, c, 0);
+    }
+    let gap_filled = draft
         .report
-        .filled
+        .gap_filled
         .iter()
         .map(|(ct, source, file)| FilledView {
             clause_type: ct.clone(),
@@ -763,14 +792,43 @@ fn build_preview(spec: draftos_core::MatterSpec, records: Vec<SourceRecord>) -> 
     Ok(DraftPreview {
         title: doc.meta.title.clone(),
         contract_type: doc.meta.contract_type.clone(),
+        skeleton: draft.report.skeleton.as_ref().map(|s| SkeletonView {
+            source: s.source_name.clone(),
+            file: s.file.clone(),
+            title: s.title.clone(),
+            contract_type: s.contract_type.clone(),
+            exact_type_match: s.exact_type_match,
+            clause_count: s.clause_count,
+        }),
         clauses,
-        filled,
+        gap_filled,
         missing: draft.report.missing.clone(),
+        excluded: draft.report.excluded.clone(),
+        schedules: draft.report.schedules.clone(),
+        definitions: draft.report.definitions.clone(),
+        notes: draft.report.notes.clone(),
         variables: collect_variables(doc),
         errors: report.errors().map(finding_view).collect(),
         warnings: report.warnings().map(finding_view).collect(),
         renderable: !report.has_errors(),
     })
+}
+
+/// Flatten the clause tree for the preview list, keeping each clause's depth so
+/// the UI can show the document's real structure.
+fn push_clause_preview(out: &mut Vec<ClausePreview>, c: &draftos_core::LirClause, depth: usize) {
+    out.push(ClausePreview {
+        number: c.number.clone(),
+        heading: c.heading.clone(),
+        depth,
+        source: c.provenance.source.clone(),
+        file: c.provenance.file.clone(),
+        adapted: c.provenance.adapted_by_model,
+        snippet: clause_snippet(c),
+    });
+    for child in &c.children {
+        push_clause_preview(out, child, depth + 1);
+    }
 }
 
 #[tauri::command]

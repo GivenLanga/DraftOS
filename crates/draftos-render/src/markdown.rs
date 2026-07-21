@@ -25,9 +25,7 @@ pub fn render_markdown(doc: &LirDocument) -> String {
     }
 
     for c in &doc.clauses {
-        out.push_str(&format!("## {}. {}\n\n", c.number, c.heading));
-        out.push_str(&blocks_md(&c.body, 0));
-        out.push('\n');
+        clause_md(&mut out, c, 2);
     }
 
     if !doc.schedules.is_empty() {
@@ -52,6 +50,28 @@ pub fn render_markdown(doc: &LirDocument) -> String {
         out.push_str(&format!("\n_Governing law: {j}._\n"));
     }
     out
+}
+
+/// One clause and its sub-clauses. Sub-clauses keep their own numbers and
+/// nesting rather than being flattened into the parent's prose.
+fn clause_md(out: &mut String, c: &LirClause, level: usize) {
+    if c.heading.trim().is_empty() {
+        // A headingless sub-clause reads as a contract does: the number runs
+        // into its own text rather than sitting on a heading line of its own.
+        let body = blocks_md(&c.body, 0);
+        out.push_str(&format!("{} {}", c.number, body.trim_start()));
+        if !body.ends_with("\n\n") {
+            out.push('\n');
+        }
+    } else {
+        let hashes = "#".repeat(level.min(6));
+        out.push_str(&format!("{hashes} {}. {}\n\n", c.number, c.heading));
+        out.push_str(&blocks_md(&c.body, 0));
+    }
+    out.push('\n');
+    for child in &c.children {
+        clause_md(out, child, level + 1);
+    }
 }
 
 fn blocks_md(blocks: &[Block], indent: usize) -> String {

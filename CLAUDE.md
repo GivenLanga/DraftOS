@@ -208,12 +208,24 @@ OneDrive, Google Drive.
 
 ## 7. Drafting Pipeline (deterministic core)
 
+**The corpus supplies the structure, not DraftOS.** DraftOS owns no template. A
+draft follows a precedent from the user's own knowledge sources — its clause
+order, its nesting, its definitions, its schedules. `draftos-rules` is a
+*checklist* that audits the result and reports gaps; it never generates
+structure. An unknown contract type has no checklist and drafts from its own
+precedents unaudited. This is what makes "attach any legal RAG and it still
+works" true rather than aspirational (see docs/DECISIONS.md, 2026-07-21).
+
 ```
 Matter Intake   → structured questionnaire → typed MatterSpec (draftos-core)
-Retrieve        → draftos-retrieval pulls candidate clauses from mounted sources,
-                  filtered by metadata (contract_type, jurisdiction, approved=true first)
-Assemble        → draftos-rules decides required/forbidden clauses; draftos-assemble
-                  orders them, resolves numbering, definitions, cross-references → LIR
+Choose skeleton → the best-matching indexed precedent (contract type, title,
+                  jurisdiction, completeness); MatterSpec.skeleton_precedent overrides
+Assemble        → rebuild that precedent's clause tree (parents + sub-clauses),
+                  substitute variables, renumber hierarchically, remap
+                  cross-references, carry definitions/schedules/recitals → LIR
+Audit + gap-fill→ draftos-rules reports required clause types the precedent lacks;
+                  draftos-retrieval supplies them from other precedents
+                  (filtered by contract_type, jurisdiction, approved=true first)
 Adapt (LLM)     → only where a clause needs party names, variables, or tone changes:
                   prompt compiler builds a constrained rewrite task; output is LIR nodes
 Validate        → draftos-validate: undefined terms, dangling cross-references, missing
@@ -230,8 +242,10 @@ The canonical JSON document format. Every model output and every assembled draft
 Full schema lives in `docs/LIR_SPEC.md`; core shape:
 
 - `Document { meta, parties[], recitals[], definitions[], clauses[], schedules[], execution }`
-- `Clause { id, number, heading, body: Vec<Block>, cross_refs[], defined_terms_used[],
-  source_provenance }`
+- `Clause { id, number, heading, body: Vec<Block>, children: Vec<Clause>,
+  cross_refs[], defined_terms_used[], source_provenance }` — `children` holds
+  sub-clauses, so a precedent's nesting survives; `number` is hierarchical
+  ("3", "3.1", "3.1.2") and assigned only by the assembler
 - `Block` = paragraph / numbered list / table / placeholder-variable
 - Every node carries provenance (which source, which file, which original clause) so any
   rendered paragraph is traceable back to a precedent.
@@ -314,12 +328,17 @@ sqlite-vec + graph edges), ingest (incremental scan + watcher), retrieval
 app (`draftos-desktop`: Library sidebar with attach/detach/rescan/remove,
 background watcher per source, hybrid search with filters, Model settings +
 an Assistant tab with a cloud/local privacy banner), **and the Phase 2
-deterministic drafting pipeline**: rules (per-contract-type required clause
-types + canonical order), assemble (MatterSpec + retrieval → ordered,
-freshly-numbered LIR with provenance and `{{variable}}` substitution),
-validate (unresolved variables, numbering, dangling cross-refs, undefined
-terms, missing parties/execution — errors block rendering), render (LIR →
-DOCX and Markdown), **and the Phase 3 model layer**: draftos-models
+deterministic drafting pipeline**: rules (an *advisory checklist* of required
+clause types per contract type, plus where a missing one belongs — it never
+generates structure), assemble (**precedent-led**: picks the best-matching
+indexed precedent as a skeleton, rebuilds its clause tree with sub-clauses,
+substitutes `{{variables}}`, renumbers hierarchically, remaps cross-references
+old→new, and carries its definitions, schedules and recitals through, with
+provenance on every node), validate (unresolved variables, hierarchical
+numbering, dangling cross-refs, undefined terms, missing parties/execution,
+and `foreign-party-name` — a company named in the draft that is not a party,
+i.e. a precedent's parties surviving a copy-paste — errors block rendering),
+render (LIR → DOCX and Markdown, walking the clause tree), **and the Phase 3 model layer**: draftos-models
 (synchronous `ModelAdapter` over ureq; Anthropic + one OpenAI-compatible
 adapter covering OpenAI/Ollama/vLLM/DeepSeek/Mistral/Qwen; keys in the OS
 keychain with env-var override; selection persisted in the app-DB settings
@@ -344,7 +363,9 @@ desktop app. Deviations from this spec are logged in docs/DECISIONS.md.
 
 MatterSpec JSON shape (see `crates/draftos-core/src/matter.rs`): title,
 contract_type, jurisdiction, parties[{id,name,role,reg_no,…}], variables
-{name→value}, source_scope[], include/exclude_clause_types[].
+{name→value}, source_scope[], include/exclude_clause_types[],
+skeleton_precedent (name a precedent to draft from, overriding the automatic
+choice), approved_only.
 
 Desktop app: `cargo build --release -p draftos-desktop`. The UI lives in
 `apps/draftos-desktop/ui/` (plain HTML/CSS/JS, no build step) and calls the

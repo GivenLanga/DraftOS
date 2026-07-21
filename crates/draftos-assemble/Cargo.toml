@@ -9,4 +9,8 @@ draftos-rules = { workspace = true }
 draftos-retrieval = { workspace = true }
 draftos-index = { workspace = true }
 draftos-embed = { workspace = true }
+draftos-extract = { workspace = true }
 regex = { workspace = true }
+
+[dev-dependencies]
+draftos-validate = { workspace = true }

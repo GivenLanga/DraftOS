@@ -19,9 +19,34 @@ pub struct Filters {
     pub clause_type: Option<String>,
     /// e.g. only definitions.
     pub kind: Option<ClauseKind>,
+    /// Kinds that must never be returned. Looking for an operative clause must
+    /// not surface schedule or signature-block text.
+    pub exclude_kinds: Vec<ClauseKind>,
     /// e.g. "Share Purchase Agreement".
     pub contract_type: Option<String>,
+    /// When true, only vetted precedent is eligible (CLAUDE.md §7).
+    pub approved_only: bool,
 }
+
+impl Filters {
+    /// Filters for retrieving an operative clause: never front matter, never a
+    /// schedule, never a signature block.
+    pub fn operative_clause() -> Filters {
+        Filters {
+            exclude_kinds: vec![
+                ClauseKind::Definition,
+                ClauseKind::Schedule,
+                ClauseKind::Recital,
+                ClauseKind::Execution,
+            ],
+            ..Filters::default()
+        }
+    }
+}
+
+/// Rank bonus applied to precedent explicitly marked approved, so vetted
+/// wording outranks equally-scoring unvetted wording (CLAUDE.md §7).
+const APPROVED_BOOST: f64 = 1.5;
 
 pub fn search(
     bundles: &[SourceBundle],
@@ -57,6 +82,9 @@ pub fn search(
 
         for (rowid, mut hit) in bundle.hydrate(&rowids)? {
             hit.score = fused[&rowid];
+            if hit.metadata.approved == Some(true) {
+                hit.score *= APPROVED_BOOST;
+            }
             if matches_filters(&hit, filters) {
                 all_hits.push(hit);
             }
@@ -100,6 +128,12 @@ fn matches_filters(hit: &ClauseHit, filters: &Filters) -> bool {
         if hit.kind != *kind {
             return false;
         }
+    }
+    if filters.exclude_kinds.contains(&hit.kind) {
+        return false;
+    }
+    if filters.approved_only && hit.metadata.approved != Some(true) {
+        return false;
     }
     if let Some(ct) = &filters.clause_type {
         match &hit.metadata.clause_type {

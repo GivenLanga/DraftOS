@@ -25,6 +25,14 @@ pub struct MatterSpec {
     /// Restrict retrieval to these source names; empty = all attached sources.
     #[serde(default)]
     pub source_scope: Vec<String>,
+    /// Draft from this specific precedent (matched against a document's file
+    /// path or title). Empty = DraftOS picks the best-matching precedent in the
+    /// mounted sources. The chosen precedent supplies the document's structure.
+    #[serde(default)]
+    pub skeleton_precedent: Option<String>,
+    /// Only draw on precedent explicitly marked approved (CLAUDE.md §7).
+    #[serde(default)]
+    pub approved_only: bool,
     /// Optional extra clause types to include beyond the contract-type rule.
     #[serde(default)]
     pub include_clause_types: Vec<String>,

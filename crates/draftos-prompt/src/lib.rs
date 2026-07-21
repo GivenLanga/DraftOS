@@ -202,6 +202,8 @@ mod tests {
             file: "loan.docx".into(),
             kind: draftos_core::ClauseKind::Clause,
             number: Some("12".into()),
+            seq: 0,
+            depth: 0,
             heading: Some("Termination".into()),
             term: None,
             body: "Either party may terminate on 30 days notice.".into(),

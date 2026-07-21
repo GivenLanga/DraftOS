@@ -5,6 +5,8 @@ fn clause(heading: &str, body: &str) -> ExtractedClause {
     ExtractedClause {
         kind: ClauseKind::Clause,
         number: None,
+        seq: 0,
+        depth: 0,
         heading: Some(heading.to_string()),
         term: None,
         body: body.to_string(),
@@ -14,6 +16,14 @@ fn clause(heading: &str, body: &str) -> ExtractedClause {
             clause_type: Some(heading.to_string()),
             ..Default::default()
         },
+    }
+}
+
+fn meta() -> draftos_index::DocumentMeta {
+    draftos_index::DocumentMeta {
+        contract_type: Some("Service Agreement".into()),
+        jurisdiction: Some("South Africa".into()),
+        title: Some("Service Agreement".into()),
     }
 }
 
@@ -46,6 +56,7 @@ fn upsert_search_reopen_and_delete_roundtrip() {
             .upsert_document(
                 "a.txt",
                 "hash1",
+                &meta(),
                 &[
                     clause("Termination", "Either party may terminate on notice."),
                     clause("Payment", "The purchase price is payable in cash."),
@@ -74,6 +85,7 @@ fn upsert_search_reopen_and_delete_roundtrip() {
             .upsert_document(
                 "a.txt",
                 "hash2",
+                &meta(),
                 &[clause("Termination", "Updated termination wording here.")],
                 &[unit_vec(8, 2)],
             )

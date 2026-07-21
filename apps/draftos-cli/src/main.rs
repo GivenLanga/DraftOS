@@ -414,6 +414,7 @@ fn run_search(
         clause_type,
         contract_type,
         kind: kind.as_deref().map(ClauseKind::parse),
+        ..Filters::default()
     };
     let hits = draftos_retrieval::search(&bundles, embedder, query, &filters, limit)?;
     db.audit(
@@ -524,15 +525,40 @@ fn run_draft(
     let doc = &draft.document;
 
     println!("Assembled '{}' ({})", doc.meta.title, spec.contract_type);
-    for (ct, source, file) in &draft.report.filled {
-        if file.is_empty() {
-            println!("  ✓ {ct:<24} ← {source}");
-        } else {
-            println!("  ✓ {ct:<24} ← {source} / {file}");
-        }
+    if let Some(s) = &draft.report.skeleton {
+        println!(
+            "  · structure from {} / {} ({} clauses{})",
+            s.source_name,
+            s.file,
+            s.clause_count,
+            if s.exact_type_match {
+                String::new()
+            } else {
+                format!(
+                    ", a {}",
+                    s.contract_type.as_deref().unwrap_or("document of another type")
+                )
+            }
+        );
+    }
+    println!(
+        "  · {} clauses ({} top-level), {} definitions, {} schedules",
+        doc.clause_count(),
+        doc.clauses.len(),
+        doc.definitions.len(),
+        doc.schedules.len(),
+    );
+    for (ct, source, file) in &draft.report.gap_filled {
+        println!("  + {ct:<24} ← {source} / {file} (not in the precedent)");
+    }
+    for excluded in &draft.report.excluded {
+        println!("  − {excluded:<24} (excluded by the matter spec)");
     }
     for missing in &draft.report.missing {
-        println!("  ✗ {missing:<24} (no precedent found)");
+        println!("  ✗ {missing:<24} (required, and no precedent found anywhere)");
+    }
+    for note in &draft.report.notes {
+        println!("  ! {note}");
     }
 
     // Validate.

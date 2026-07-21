@@ -33,6 +33,39 @@ impl LirDocument {
             execution: Execution::default(),
         }
     }
+
+    /// Every clause in the document, depth-first (parents before children).
+    /// Validation, cross-reference rewriting and rendering all walk this so a
+    /// sub-clause is never silently skipped.
+    pub fn walk_clauses(&self) -> Vec<&LirClause> {
+        let mut out = Vec::new();
+        for c in &self.clauses {
+            c.collect_into(&mut out);
+        }
+        out
+    }
+
+    /// Total clause count including sub-clauses.
+    pub fn clause_count(&self) -> usize {
+        self.walk_clauses().len()
+    }
+}
+
+impl LirClause {
+    fn collect_into<'a>(&'a self, out: &mut Vec<&'a LirClause>) {
+        out.push(self);
+        for c in &self.children {
+            c.collect_into(out);
+        }
+    }
+
+    /// Apply `f` to this clause and every descendant, parents first.
+    pub fn walk_mut(&mut self, f: &mut impl FnMut(&mut LirClause)) {
+        f(self);
+        for c in &mut self.children {
+            c.walk_mut(f);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +94,11 @@ pub struct Party {
 pub struct Recital {
     pub id: String,
     pub body: Vec<Block>,
+    #[serde(default)]
+    pub provenance: Provenance,
+    /// Original OOXML body paragraphs, as for `LirClause::source_ooxml`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_ooxml: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,9 +117,14 @@ pub struct Definition {
 pub struct LirClause {
     pub id: String,
     /// Assigned by the assembler only — never by a model or a precedent.
+    /// Hierarchical: "3", "3.1", "3.1.2".
     pub number: String,
     pub heading: String,
     pub body: Vec<Block>,
+    /// Sub-clauses, in order. A precedent's nesting is preserved here rather
+    /// than flattened into run-on paragraphs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<LirClause>,
     pub cross_refs: Vec<String>,
     pub defined_terms_used: Vec<String>,
     pub provenance: Provenance,
@@ -104,6 +147,13 @@ pub struct Schedule {
     pub id: String,
     pub title: String,
     pub body: Vec<Block>,
+    #[serde(default)]
+    pub provenance: Provenance,
+    /// Original OOXML body paragraphs, as for `LirClause::source_ooxml`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_ooxml: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heading_ooxml: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

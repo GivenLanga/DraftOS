@@ -17,6 +17,9 @@ pub enum CoreError {
     #[error("knowledge source error: {0}")]
     Source(String),
 
+    #[error("assembly error: {0}")]
+    Assembly(String),
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 

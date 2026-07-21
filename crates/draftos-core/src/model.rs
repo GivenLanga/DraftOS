@@ -63,6 +63,15 @@ pub struct ExtractedClause {
     pub kind: ClauseKind,
     /// Clause number as it appeared in the document ("12", "12.3").
     pub number: Option<String>,
+    /// Position of this object within its source document (0-based). Preserving
+    /// it is what lets the assembler rebuild a precedent's own clause order
+    /// instead of imposing a hardcoded one.
+    #[serde(default)]
+    pub seq: usize,
+    /// Nesting depth implied by the source numbering: "12" → 0, "12.3" → 1,
+    /// "12.3.1" → 2. Sub-clauses stay addressable as children of their parent.
+    #[serde(default)]
+    pub depth: u8,
     pub heading: Option<String>,
     /// The defined term, for `kind == Definition` ("Effective Date").
     pub term: Option<String>,
@@ -103,6 +112,12 @@ pub struct ClauseHit {
     pub file: String,
     pub kind: ClauseKind,
     pub number: Option<String>,
+    /// Position within the source document; see `ExtractedClause::seq`.
+    #[serde(default)]
+    pub seq: usize,
+    /// Nesting depth; see `ExtractedClause::depth`.
+    #[serde(default)]
+    pub depth: u8,
     pub heading: Option<String>,
     pub term: Option<String>,
     pub body: String,

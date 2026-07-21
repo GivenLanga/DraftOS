@@ -390,7 +390,7 @@ function renderAnswer(view) {
 
 // ---------- Draft ----------
 
-let contractTypes = []; // [{contract_type, required}]
+let contractTypes = []; // [{contract_type, precedents, required}] — from the corpus
 let lastPreviewOk = false;
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -402,7 +402,14 @@ async function refreshContractTypes() {
   for (const ct of contractTypes) {
     const o = document.createElement('option');
     o.value = ct.contract_type;
-    o.textContent = ct.contract_type;
+    o.textContent = `${ct.contract_type} (${ct.precedents} precedent${ct.precedents === 1 ? '' : 's'})`;
+    sel.appendChild(o);
+  }
+  if (!contractTypes.length) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = 'No precedents indexed — attach a source first';
+    o.disabled = true;
     sel.appendChild(o);
   }
   const custom = document.createElement('option');
@@ -418,8 +425,17 @@ function updateRequiredHint() {
   $('draft-custom-field').hidden = !isCustom;
   const info = contractTypes.find((c) => c.contract_type === sel.value);
   const hint = $('draft-required');
-  if (info) hint.textContent = 'Required clauses: ' + info.required.join(', ');
-  else hint.textContent = isCustom ? 'Unknown type — a generic clause order is used.' : '';
+  if (info && info.required.length) {
+    hint.textContent =
+      'Structure comes from the best-matching precedent. Checklist for this type: ' +
+      info.required.join(', ');
+  } else if (info) {
+    hint.textContent = 'Structure comes from the best-matching precedent. No checklist for this type.';
+  } else {
+    hint.textContent = isCustom
+      ? 'Structure comes from the best-matching precedent in your sources.'
+      : '';
+  }
 }
 
 function addPartyRow(role = '') {
@@ -533,6 +549,11 @@ function renderDraftClause(c) {
   const card = document.createElement('article');
   card.className = 'hit';
   card.tabIndex = 0;
+  // Indent sub-clauses so the preview shows the document's real structure.
+  if (c.depth) {
+    card.style.marginLeft = Math.min(c.depth, 3) * 1.5 + 'rem';
+    card.classList.add('sub-clause');
+  }
   const head = document.createElement('div');
   head.className = 'hit-head';
   if (c.number) {
@@ -543,7 +564,8 @@ function renderDraftClause(c) {
   }
   const t = document.createElement('h3');
   t.className = 'hit-title';
-  t.textContent = c.heading || '(untitled)';
+  // Sub-clauses legitimately have no heading; only a top-level one is untitled.
+  t.textContent = c.heading || (c.depth ? '' : '(untitled)');
   head.appendChild(t);
   if (c.adapted) {
     const k = document.createElement('span');
@@ -580,23 +602,34 @@ function renderDraftPreview(v) {
     : `${v.errors.length} error${v.errors.length === 1 ? '' : 's'} block rendering — resolve them, then preview again.`;
   out.appendChild(banner);
 
-  if (v.filled.length || v.missing.length) {
-    const rep = document.createElement('div');
-    rep.className = 'draft-report';
-    for (const f of v.filled) {
-      const line = document.createElement('div');
-      line.className = 'rep-line ok';
-      line.textContent = `✓ ${f.clause_type} ← ${f.source}${f.file ? ' / ' + f.file : ''}`;
-      rep.appendChild(line);
-    }
-    for (const m of v.missing) {
-      const line = document.createElement('div');
-      line.className = 'rep-line miss';
-      line.textContent = `✗ ${m} — no precedent found`;
-      rep.appendChild(line);
-    }
-    out.appendChild(rep);
+  const rep = document.createElement('div');
+  rep.className = 'draft-report';
+  const repLine = (cls, text) => {
+    const line = document.createElement('div');
+    line.className = 'rep-line ' + cls;
+    line.textContent = text;
+    rep.appendChild(line);
+  };
+
+  // Which precedent gave the draft its structure — the single most important
+  // thing for a drafter to be able to check.
+  if (v.skeleton) {
+    const s = v.skeleton;
+    repLine(
+      s.exact_type_match ? 'ok' : 'warn',
+      `Structure from ${s.source} / ${s.file} — ${s.clause_count} clauses` +
+        (s.exact_type_match ? '' : ` (a ${s.contract_type || 'document of another type'})`)
+    );
   }
+  if (v.schedules.length) repLine('ok', `Schedules carried through: ${v.schedules.join(', ')}`);
+  if (v.definitions.length) repLine('ok', `${v.definitions.length} defined terms carried through`);
+  for (const f of v.gap_filled) {
+    repLine('ok', `+ ${f.clause_type} ← ${f.source}${f.file ? ' / ' + f.file : ''} (not in the precedent)`);
+  }
+  for (const e of v.excluded) repLine('warn', `− ${e} — excluded by this matter`);
+  for (const m of v.missing) repLine('miss', `✗ ${m} — required, and no precedent found anywhere`);
+  for (const n of v.notes) repLine('warn', `! ${n}`);
+  if (rep.childElementCount) out.appendChild(rep);
 
   if (v.errors.length || v.warnings.length) {
     const val = document.createElement('div');
@@ -616,9 +649,10 @@ function renderDraftPreview(v) {
 const DRAFT_WELCOME =
   '<div class="welcome">' +
   '<p class="welcome-lede">Assemble a contract from your precedents.</p>' +
-  '<p>Choose a contract type, name the parties, and preview. DraftOS pulls the ' +
-  "required clauses from your attached sources, assembles them into a numbered " +
-  "draft, and tells you exactly what's missing or unresolved before it renders.</p>" +
+  '<p>Choose a contract type, name the parties, and preview. DraftOS picks the ' +
+  'best-matching precedent in your attached sources and follows <em>its</em> structure — ' +
+  'its clauses, sub-clauses, definitions and schedules — renumbering throughout and ' +
+  "telling you exactly what's missing or unresolved before it renders.</p>" +
   '</div>';
 
 function resetDraftOutput() {

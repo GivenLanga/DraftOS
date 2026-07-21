@@ -1111,9 +1111,11 @@ version = "0.1.0"
 dependencies = [
  "draftos-core",
  "draftos-embed",
+ "draftos-extract",
  "draftos-index",
  "draftos-retrieval",
  "draftos-rules",
+ "draftos-validate",
  "regex",
 ]
 
