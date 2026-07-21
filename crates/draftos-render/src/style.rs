@@ -21,6 +21,10 @@ pub struct StyleDonor {
     /// The body-level `<w:sectPr>` (page size + margins), with header/footer
     /// references stripped since we don't copy those parts.
     pub sect_pr: Option<String>,
+    /// The attributes of the donor's `<w:document …>` root (namespace
+    /// declarations). We reuse these so the original clause paragraphs we lift
+    /// — which use prefixes like `w14:`/`mc:` — remain namespace-valid.
+    pub document_attrs: Option<String>,
 }
 
 fn read_part<R: Read + Seek>(archive: &mut zip::ZipArchive<R>, name: &str) -> Option<String> {
@@ -34,9 +38,9 @@ impl StyleDonor {
     pub fn from_docx_bytes(bytes: &[u8]) -> Result<StyleDonor> {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
             .map_err(|e| CoreError::Index(format!("open donor docx: {e}")))?;
-        let sect_pr = read_part(&mut archive, "word/document.xml")
-            .as_deref()
-            .and_then(extract_sect_pr);
+        let document_xml = read_part(&mut archive, "word/document.xml");
+        let sect_pr = document_xml.as_deref().and_then(extract_sect_pr);
+        let document_attrs = document_xml.as_deref().and_then(extract_document_attrs);
         Ok(StyleDonor {
             styles_xml: read_part(&mut archive, "word/styles.xml"),
             theme_xml: read_part(&mut archive, "word/theme/theme1.xml"),
@@ -44,6 +48,7 @@ impl StyleDonor {
             numbering_xml: read_part(&mut archive, "word/numbering.xml"),
             settings_xml: read_part(&mut archive, "word/settings.xml"),
             sect_pr,
+            document_attrs,
         })
     }
 
@@ -56,6 +61,15 @@ impl StyleDonor {
     pub fn is_usable(&self) -> bool {
         self.styles_xml.is_some()
     }
+}
+
+/// The attribute text of the `<w:document …>` root element (all the `xmlns:*`
+/// declarations), so lifted paragraphs keep valid namespaces.
+fn extract_document_attrs(document_xml: &str) -> Option<String> {
+    let start = document_xml.find("<w:document")? + "<w:document".len();
+    let end = document_xml[start..].find('>')? + start;
+    let attrs = document_xml[start..end].trim().trim_end_matches('/').trim();
+    (!attrs.is_empty()).then(|| attrs.to_string())
 }
 
 /// Pull the last `<w:sectPr>…</w:sectPr>` (the body-level one) out of a

@@ -134,6 +134,9 @@ pub fn assemble(
             cross_refs: cross_refs(body_text),
             provenance: provenance(hit),
             body: blocks,
+            // Carry the precedent's original paragraph XML so the renderer can
+            // reproduce its house style; substitute variables into it too.
+            source_ooxml: hit.ooxml.iter().map(|x| substitute(x, vars)).collect(),
         });
         report
             .filled
@@ -231,6 +234,7 @@ fn build_definitions_clause(number: u32, definitions: &[Definition]) -> LirClaus
         cross_refs: Vec::new(),
         defined_terms_used: definitions.iter().map(|d| d.term.clone()).collect(),
         provenance: Provenance::default(),
+        source_ooxml: Vec::new(),
     }
 }
 

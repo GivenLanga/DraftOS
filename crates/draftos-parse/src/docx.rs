@@ -40,6 +40,10 @@ fn extract_paragraphs(xml: &str, file_name: &str) -> Result<Vec<Paragraph>> {
     let mut current = String::new();
     let mut heading_level: Option<u8> = None;
     let mut in_paragraph = false;
+    // Cursor into `xml`: the raw OOXML of each paragraph is sliced out directly
+    // by string scan (robust — `<w:p>` never nests), advanced past every
+    // paragraph the walker closes so it stays aligned with the text pass.
+    let mut scan_from: usize = 0;
 
     loop {
         match reader.read_event() {
@@ -80,11 +84,15 @@ fn extract_paragraphs(xml: &str, file_name: &str) -> Result<Vec<Paragraph>> {
             Ok(Event::End(e)) => {
                 if e.local_name().as_ref() == b"p" {
                     in_paragraph = false;
+                    // Consume this paragraph's raw span, keeping the cursor aligned
+                    // whether or not the paragraph has text.
+                    let raw = next_paragraph_span(xml, &mut scan_from);
                     let text = normalize_ws(&current);
                     if !text.is_empty() {
                         paragraphs.push(Paragraph {
                             text,
                             heading_level,
+                            ooxml: raw,
                         });
                     }
                 }
@@ -102,6 +110,31 @@ fn extract_paragraphs(xml: &str, file_name: &str) -> Result<Vec<Paragraph>> {
     Ok(paragraphs)
 }
 
+/// Slice out the next `<w:p …>…</w:p>` element starting at `*from`, advancing
+/// `*from` past it. Matches the paragraph element specifically (not `<w:pPr>`,
+/// `<w:pStyle>`, …) by requiring `>` or whitespace after `<w:p`, and relies on
+/// the fact that `w:p` never nests. Returns the raw XML, or `None` if not found.
+fn next_paragraph_span(xml: &str, from: &mut usize) -> Option<String> {
+    let bytes = xml.as_bytes();
+    let mut i = *from;
+    loop {
+        let rel = xml[i..].find("<w:p")?;
+        let start = i + rel;
+        let after = start + 4; // byte just past "<w:p"
+        match bytes.get(after) {
+            // A real paragraph element opener.
+            Some(b'>') | Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') => {
+                let erel = xml[start..].find("</w:p>")?;
+                let end = start + erel + "</w:p>".len();
+                *from = end;
+                return Some(xml[start..end].to_string());
+            }
+            // "<w:pPr", "<w:pStyle", "<w:p/>" (empty) … keep scanning.
+            _ => i = after,
+        }
+    }
+}
+
 /// Map DOCX paragraph style ids to heading levels: Heading1/heading 1/Title…
 fn heading_level_from_style(style: &str) -> Option<u8> {
     let s = style.to_ascii_lowercase().replace(' ', "");
@@ -115,4 +148,22 @@ fn heading_level_from_style(style: &str) -> Option<u8> {
 
 fn normalize_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paragraph_spans_are_captured_whole_and_skip_ppr() {
+        let xml = r#"<w:body><w:p w:rsidR="00A"><w:pPr><w:pStyle w:val="Clause2Sub"/></w:pPr><w:r><w:t>First &amp; only.</w:t></w:r></w:p><w:p><w:r><w:t>Second</w:t></w:r></w:p></w:body>"#;
+        let mut from = 0;
+        let p1 = next_paragraph_span(xml, &mut from).unwrap();
+        assert!(p1.starts_with("<w:p ") && p1.ends_with("</w:p>"), "whole element: {p1}");
+        assert!(p1.contains(r#"w:val="Clause2Sub""#));
+        assert!(p1.contains("First &amp; only."));
+        let p2 = next_paragraph_span(xml, &mut from).unwrap();
+        assert_eq!(p2, "<w:p><w:r><w:t>Second</w:t></w:r></w:p>");
+        assert!(next_paragraph_span(xml, &mut from).is_none());
+    }
 }

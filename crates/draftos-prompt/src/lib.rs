@@ -205,6 +205,7 @@ mod tests {
             heading: Some("Termination".into()),
             term: None,
             body: "Either party may terminate on 30 days notice.".into(),
+            ooxml: Vec::new(),
             metadata: ClauseMetadata::default(),
             score: 1.0,
         };

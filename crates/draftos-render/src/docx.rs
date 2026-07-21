@@ -177,7 +177,16 @@ fn build_document_xml(doc: &LirDocument, donor: Option<&StyleDonor>) -> String {
             HeadingKind::Section,
             styled,
         ));
-        body.push_str(&blocks_xml(&c.body, styled));
+        // Prefer the precedent's own paragraphs (its house style) when we have
+        // them and a donor is styling the document; strip their source
+        // auto-numbering so our clause numbers are the only ones shown.
+        if styled && !c.source_ooxml.is_empty() {
+            for p in &c.source_ooxml {
+                body.push_str(&prepare_source_paragraph(p));
+            }
+        } else {
+            body.push_str(&blocks_xml(&c.body, styled));
+        }
     }
 
     for s in &doc.schedules {
@@ -206,10 +215,71 @@ fn build_document_xml(doc: &LirDocument, donor: Option<&StyleDonor>) -> String {
         body.push_str(sect);
     }
 
+    // Reuse the donor's root namespace declarations when styling, so lifted
+    // paragraphs (w14:/mc:/…) stay valid; otherwise a minimal w+r set.
+    const DEFAULT_ATTRS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
+    let attrs = donor
+        .and_then(|d| d.document_attrs.as_deref())
+        .unwrap_or(DEFAULT_ATTRS);
+
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>{body}</w:body></w:document>"#
+<w:document {attrs}><w:body>{body}</w:body></w:document>"#
     )
+}
+
+/// Prepare a lifted source paragraph for a new document:
+/// - strip the paragraph-level `<w:numPr>` so the source's own clause numbers
+///   don't show (DraftOS applies its own);
+/// - unwrap `<w:hyperlink>` elements, keeping their text but dropping the link —
+///   its `r:id` points at a relationship in the source package we don't carry,
+///   which would otherwise dangle;
+/// - drop embedded drawings/objects (`<w:drawing>`, `<w:pict>`, `<w:object>`),
+///   whose `r:embed`/`r:id` media parts we likewise don't carry.
+///
+/// Everything that drives the *look* — the paragraph style, direct run fonts,
+/// indentation, spacing and justification — is kept, so the clause renders in
+/// its precedent's house style.
+fn prepare_source_paragraph(p: &str) -> String {
+    let mut out = strip_element(p, "<w:numPr", "</w:numPr>");
+    out = strip_element(&out, "<w:drawing", "</w:drawing>");
+    out = strip_element(&out, "<w:pict", "</w:pict>");
+    out = strip_element(&out, "<w:object", "</w:object>");
+    unwrap_element(&out, "w:hyperlink")
+}
+
+/// Remove an element's open and close tags but keep its inner content
+/// (`<tag …>inner</tag>` → `inner`). Used to dissolve hyperlinks.
+fn unwrap_element(s: &str, tag: &str) -> String {
+    let close = format!("</{tag}>");
+    let mut out = s.replace(&close, "");
+    let open = format!("<{tag}");
+    loop {
+        let Some(start) = out.find(&open) else { break };
+        match out[start..].find('>') {
+            Some(rel) => out.replace_range(start..start + rel + 1, ""),
+            None => break,
+        }
+    }
+    out
+}
+
+/// Remove every `<tag …>…</close>` (or self-closing `<tag …/>`) region.
+fn strip_element(s: &str, open: &str, close: &str) -> String {
+    let mut out = s.to_string();
+    loop {
+        let Some(start) = out.find(open) else { break };
+        if let Some(rel) = out[start..].find(close) {
+            let end = start + rel + close.len();
+            out.replace_range(start..end, "");
+        } else if let Some(rel) = out[start..].find("/>") {
+            let end = start + rel + 2;
+            out.replace_range(start..end, "");
+        } else {
+            break;
+        }
+    }
+    out
 }
 
 enum HeadingKind {
@@ -330,4 +400,19 @@ fn esc(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepare_strips_numbering_keeps_style_and_dissolves_hyperlinks() {
+        let p = r#"<w:p><w:pPr><w:pStyle w:val="Clause2Sub"/><w:numPr><w:ilvl w:val="1"/><w:numId w:val="51"/></w:numPr></w:pPr><w:hyperlink w:history="1" r:id="Rabc"><w:r><w:t>see clause 8</w:t></w:r></w:hyperlink></w:p>"#;
+        let out = prepare_source_paragraph(p);
+        assert!(!out.contains("<w:numPr"), "numbering removed: {out}");
+        assert!(out.contains(r#"w:val="Clause2Sub""#), "style kept");
+        assert!(!out.contains("<w:hyperlink") && !out.contains("r:id"), "hyperlink dissolved: {out}");
+        assert!(out.contains("see clause 8"), "link text kept");
+    }
 }

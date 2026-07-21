@@ -27,6 +27,7 @@ fn sample_doc() -> LirDocument {
         id: draftos_core::new_id(),
         number: "1".into(),
         heading: "Confidentiality".into(),
+        source_ooxml: Vec::new(),
         body: vec![
             Block::Paragraph {
                 runs: vec![

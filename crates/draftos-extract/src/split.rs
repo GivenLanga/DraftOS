@@ -31,9 +31,30 @@ struct Builder {
     number: Option<String>,
     heading: Option<String>,
     body: Vec<String>,
+    /// Original OOXML for each body paragraph (DOCX sources), parallel to the
+    /// text collected in `body`. Empty for non-DOCX. The heading paragraph is
+    /// deliberately excluded — the renderer synthesises the heading itself.
+    body_ooxml: Vec<String>,
 }
 
 impl Builder {
+    fn new(kind: ClauseKind, number: Option<String>, heading: Option<String>) -> Self {
+        Builder {
+            kind,
+            number,
+            heading,
+            body: Vec::new(),
+            body_ooxml: Vec::new(),
+        }
+    }
+
+    fn push_body(&mut self, para: &draftos_core::Paragraph, text: &str) {
+        self.body.push(text.to_string());
+        if let Some(xml) = &para.ooxml {
+            self.body_ooxml.push(xml.clone());
+        }
+    }
+
     fn finish(self) -> Option<ExtractedClause> {
         let body = self.body.join("\n");
         if body.trim().is_empty() && self.heading.is_none() {
@@ -45,6 +66,7 @@ impl Builder {
             heading: self.heading,
             term: None,
             body,
+            ooxml: self.body_ooxml,
             metadata: ClauseMetadata::default(),
         })
     }
@@ -69,12 +91,11 @@ pub fn split_into_clauses(doc: &ParsedDocument) -> Vec<ExtractedClause> {
                 out.extend(b.finish());
             }
             in_schedule = true;
-            current = Some(Builder {
-                kind: ClauseKind::Schedule,
-                number: None,
-                heading: Some(text.to_string()),
-                body: Vec::new(),
-            });
+            current = Some(Builder::new(
+                ClauseKind::Schedule,
+                None,
+                Some(text.to_string()),
+            ));
         } else if let Some((number, heading)) = heading_info {
             if let Some(b) = current.take() {
                 out.extend(b.finish());
@@ -88,23 +109,15 @@ pub fn split_into_clauses(doc: &ParsedDocument) -> Vec<ExtractedClause> {
             } else {
                 ClauseKind::Clause
             };
-            current = Some(Builder {
-                kind,
-                number,
-                heading: Some(heading),
-                body: Vec::new(),
-            });
+            current = Some(Builder::new(kind, number, Some(heading)));
         } else {
             match &mut current {
-                Some(b) => b.body.push(text.to_string()),
+                Some(b) => b.push_body(para, text),
                 None => {
                     // Preamble before the first heading (title page, parties).
-                    current = Some(Builder {
-                        kind: ClauseKind::Recital,
-                        number: None,
-                        heading: None,
-                        body: vec![text.to_string()],
-                    });
+                    let mut b = Builder::new(ClauseKind::Recital, None, None);
+                    b.push_body(para, text);
+                    current = Some(b);
                 }
             }
         }

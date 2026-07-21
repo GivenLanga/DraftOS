@@ -14,6 +14,11 @@ pub struct Paragraph {
     /// Heading level (1-based) when the source format declares one (e.g. DOCX
     /// paragraph styles). Heuristic heading detection happens later, in extract.
     pub heading_level: Option<u8>,
+    /// The paragraph's original OOXML (`<w:p>…</w:p>`) for DOCX sources, so the
+    /// renderer can reproduce the source's exact formatting. `None` for formats
+    /// that carry no reusable formatting (PDF, plain text, HTML).
+    #[serde(default)]
+    pub ooxml: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +67,10 @@ pub struct ExtractedClause {
     /// The defined term, for `kind == Definition` ("Effective Date").
     pub term: Option<String>,
     pub body: String,
+    /// Original OOXML of the body paragraphs (DOCX sources), in order — used to
+    /// render the clause in its source's house style. Empty for other formats.
+    #[serde(default)]
+    pub ooxml: Vec<String>,
     pub metadata: ClauseMetadata,
 }
 
@@ -92,6 +101,9 @@ pub struct ClauseHit {
     pub heading: Option<String>,
     pub term: Option<String>,
     pub body: String,
+    /// Original OOXML of the body paragraphs (DOCX sources); empty otherwise.
+    #[serde(default)]
+    pub ooxml: Vec<String>,
     pub metadata: ClauseMetadata,
     /// Fused relevance score (higher is better).
     pub score: f64,

@@ -67,6 +67,7 @@ fn paragraphs_from_html(html: &str) -> Vec<Paragraph> {
                     paragraphs.push(Paragraph {
                         text: htext,
                         heading_level: Some(*level),
+                        ooxml: None,
                     });
                 }
             }
@@ -74,6 +75,7 @@ fn paragraphs_from_html(html: &str) -> Vec<Paragraph> {
             paragraphs.push(Paragraph {
                 text,
                 heading_level: None,
+                ooxml: None,
             });
         }
     }

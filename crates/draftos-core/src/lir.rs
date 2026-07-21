@@ -80,6 +80,13 @@ pub struct LirClause {
     pub cross_refs: Vec<String>,
     pub defined_terms_used: Vec<String>,
     pub provenance: Provenance,
+    /// Original OOXML body paragraphs from the source precedent (DOCX), in
+    /// order, with source auto-numbering to be stripped at render. When present,
+    /// the DOCX renderer emits these — in the precedent's own house style —
+    /// instead of synthesising paragraphs from `body`. Empty for clauses drawn
+    /// from non-DOCX sources or built synthetically (e.g. Definitions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_ooxml: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

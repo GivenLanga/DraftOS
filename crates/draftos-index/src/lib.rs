@@ -101,7 +101,10 @@ impl SourceBundle {
                     clause_type   TEXT,
                     contract_type TEXT,
                     jurisdiction  TEXT,
-                    metadata_json TEXT NOT NULL DEFAULT '{{}}'
+                    metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                    -- JSON array of the clause's original OOXML body paragraphs
+                    -- (DOCX sources), for house-style-faithful rendering.
+                    body_ooxml    TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_clauses_doc ON clauses(doc_id);
                 CREATE INDEX IF NOT EXISTS idx_clauses_type ON clauses(clause_type);
@@ -116,6 +119,11 @@ impl SourceBundle {
                 "
             ))
             .map_err(|e| CoreError::Index(format!("schema: {e}")))?;
+        // Bundles created before body_ooxml existed: add the column. Ignore the
+        // "duplicate column name" error when it is already present.
+        let _ = self
+            .conn
+            .execute("ALTER TABLE clauses ADD COLUMN body_ooxml TEXT", []);
         Ok(())
     }
 
@@ -183,11 +191,16 @@ impl SourceBundle {
         let mut clause_rows: Vec<(String, Option<String>)> = Vec::new(); // (clause_id, term)
         for (clause, embedding) in clauses.iter().zip(embeddings) {
             let clause_id = draftos_core::new_id();
+            let body_ooxml: Option<String> = if clause.ooxml.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&clause.ooxml)?)
+            };
             tx.execute(
                 "INSERT INTO clauses
                  (id, doc_id, kind, number, heading, term, body,
-                  clause_type, contract_type, jurisdiction, metadata_json)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                  clause_type, contract_type, jurisdiction, metadata_json, body_ooxml)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                 params![
                     clause_id,
                     doc_id,
@@ -200,6 +213,7 @@ impl SourceBundle {
                     clause.metadata.contract_type,
                     clause.metadata.jurisdiction,
                     serde_json::to_string(&clause.metadata)?,
+                    body_ooxml,
                 ],
             )
             .map_err(|e| CoreError::Index(e.to_string()))?;
@@ -313,7 +327,7 @@ impl SourceBundle {
             .conn
             .prepare(
                 "SELECT c.id, c.kind, c.number, c.heading, c.term, c.body,
-                        c.metadata_json, d.rel_path
+                        c.metadata_json, d.rel_path, c.body_ooxml
                  FROM clauses c JOIN documents d ON d.id = c.doc_id
                  WHERE c.rowid = ?1 AND d.deleted = 0",
             )
@@ -322,6 +336,10 @@ impl SourceBundle {
             let hit = stmt
                 .query_row(params![rowid], |r| {
                     let metadata_json: String = r.get(6)?;
+                    let ooxml: Vec<String> = r
+                        .get::<_, Option<String>>(8)?
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .unwrap_or_default();
                     Ok(ClauseHit {
                         clause_id: r.get(0)?,
                         source_name: self.manifest.name.clone(),
@@ -331,6 +349,7 @@ impl SourceBundle {
                         heading: r.get(3)?,
                         term: r.get(4)?,
                         body: r.get(5)?,
+                        ooxml,
                         metadata: serde_json::from_str::<ClauseMetadata>(&metadata_json)
                             .unwrap_or_default(),
                         score: 0.0,

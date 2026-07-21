@@ -8,6 +8,7 @@ fn doc(paras: &[(&str, Option<u8>)]) -> ParsedDocument {
             .map(|(t, h)| Paragraph {
                 text: t.to_string(),
                 heading_level: *h,
+                ooxml: None,
             })
             .collect(),
     }

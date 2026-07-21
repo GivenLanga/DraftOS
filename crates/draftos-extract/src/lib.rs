@@ -37,6 +37,7 @@ pub fn extract(doc: &ParsedDocument, rel_path: &str) -> Vec<ExtractedClause> {
                 heading: None,
                 term: Some(term),
                 body: sentence,
+                ooxml: Vec::new(),
                 metadata: ClauseMetadata::default(),
             });
         }

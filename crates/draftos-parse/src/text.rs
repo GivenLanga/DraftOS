@@ -40,6 +40,7 @@ fn flush(current: &mut Vec<&str>, out: &mut Vec<Paragraph>) {
         out.push(Paragraph {
             text,
             heading_level: None,
+            ooxml: None,
         });
     }
 }

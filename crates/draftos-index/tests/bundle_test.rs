@@ -8,6 +8,7 @@ fn clause(heading: &str, body: &str) -> ExtractedClause {
         heading: Some(heading.to_string()),
         term: None,
         body: body.to_string(),
+        ooxml: Vec::new(),
         metadata: ClauseMetadata {
             clause_type: Some(heading.to_string()),
             ..Default::default()

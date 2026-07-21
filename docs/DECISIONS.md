@@ -3,6 +3,37 @@
 Deviations from `CLAUDE.md` and notable implementation decisions, newest first.
 Each entry: date, decision, reason, alternative considered.
 
+## 2026-07-21 — Preserve original clause OOXML for true formatting fidelity
+The style-donor fix below matched the pack's *defaults* but drafts still looked
+wrong. Root cause (measured on the real pack): the source's appearance comes
+almost entirely from formatting that ingestion discarded — 527/732 paragraphs
+auto-numbered, 544 indented, 365 justified, 3042/3060 runs with direct fonts,
+19 paragraph styles — while the index stored only normalized plain text. No
+renderer-only fix can reproduce what was never captured. Owner chose "keep the
+look, renumber". Pivotal finding: the pack's numbering is *paragraph-level*
+(`<w:numPr>`), not baked into the styles (which carry only indent/font/size), so
+we can keep the styles and strip the numbers cleanly.
+
+Fix (threads original OOXML through the whole pipeline): the DOCX parser
+captures each paragraph's raw `<w:p>…</w:p>` (sliced by string scan — robust,
+`<w:p>` never nests — not quick_xml byte offsets, which came up 3 bytes short
+and truncated `</w:p>`); extract carries the body paragraphs' XML per clause
+(heading excluded — we synthesise it); the index stores it as a `body_ooxml`
+JSON column (guarded `ALTER TABLE` upgrades old bundles; re-ingest populates it);
+retrieval hydrates it onto `ClauseHit`; assemble puts it on `LirClause.source_ooxml`
+(with `{{var}}` substituted); render, when a style donor is active, emits those
+paragraphs instead of synthesising from plain text. Each lifted paragraph is
+sanitised: strip `<w:numPr>` (source numbers gone, DraftOS numbers applied),
+unwrap `<w:hyperlink>` (its `r:id` points at a source relationship we don't
+carry — keep the text, drop the dangling link), and drop `<w:drawing>/<w:pict>/
+<w:object>` (media we don't carry); the donor's `<w:document>` root namespaces
+are reused so `w14:`/`mc:` attributes on lifted paragraphs stay valid. Non-DOCX
+sources and synthetic clauses (Definitions) keep the plain-text path. Verified:
+a drafted NDA now renders its clauses in the precedent's own styles (Clause2Sub,
+Clause4Sub…), numPr count 0, no dangling r:id, all parts well-formed. Known
+limitations: sub-clause numeric labels are dropped (indentation preserved), and
+definitions still render as plain text.
+
 ## 2026-07-21 — Rendered DOCX inherits a precedent's styling (style donor)
 Owner: an assembled draft must look like the pack it was drawn from, not a bare
 default-Word document (the renderer shipped NO styles.xml, so Word applied
