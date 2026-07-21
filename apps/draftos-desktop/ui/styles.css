@@ -291,6 +291,9 @@ button.small { padding: 4px 9px; font-size: 12px; align-self: flex-start; }
 }
 
 .party-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+/* Let the inputs shrink inside the fixed-width form column instead of
+   overflowing (which pushed the delete button into the preview pane). */
+.party-row input { min-width: 0; }
 .party-row .party-reg { grid-column: 1 / 3; }
 .party-row .party-del {
   grid-row: 1;

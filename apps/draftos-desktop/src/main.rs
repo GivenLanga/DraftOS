@@ -791,6 +791,24 @@ struct SaveResult {
     format: String,
 }
 
+/// The on-disk precedent DOCX that contributed the most clauses — used as the
+/// style donor so the rendered draft matches the pack's font/spacing/margins.
+/// Only `.docx` precedents qualify (nothing to lift from a PDF/TXT).
+fn dominant_donor(doc: &draftos_core::LirDocument, records: &[SourceRecord]) -> Option<PathBuf> {
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    for c in &doc.clauses {
+        if let (Some(src), Some(file)) = (&c.provenance.source, &c.provenance.file) {
+            if !file.is_empty() && file.to_ascii_lowercase().ends_with(".docx") {
+                *counts.entry((src.clone(), file.clone())).or_default() += 1;
+            }
+        }
+    }
+    let (src, file) = counts.into_iter().max_by_key(|(_, n)| *n).map(|(k, _)| k)?;
+    let rec = records.iter().find(|r| r.name.eq_ignore_ascii_case(&src))?;
+    let path = rec.folder.join(&file);
+    path.is_file().then_some(path)
+}
+
 /// Assemble + validate + render to `path`. Errors block rendering unless `force`
 /// (mirrors the CLI's `--force`, for inspecting an incomplete draft).
 fn build_and_render(
@@ -819,7 +837,19 @@ fn build_and_render(
         .unwrap_or_default();
     let format = match ext.as_str() {
         "docx" => {
-            let bytes = draftos_render::render_docx(doc).map_err(err_str)?;
+            // Match the pack's look: render inheriting the styling of the
+            // precedent DOCX that contributed the most clauses.
+            let donor = dominant_donor(doc, &records).and_then(|p| {
+                match draftos_render::StyleDonor::from_path(&p) {
+                    Ok(d) if d.is_usable() => Some(d),
+                    Ok(_) => None,
+                    Err(e) => {
+                        tracing::warn!(donor = %p.display(), error = %e, "could not read style donor");
+                        None
+                    }
+                }
+            });
+            let bytes = draftos_render::render_docx_with_style(doc, donor.as_ref()).map_err(err_str)?;
             std::fs::write(&out, bytes).map_err(err_str)?;
             "docx"
         }

@@ -613,8 +613,25 @@ function renderDraftPreview(v) {
   for (const c of v.clauses) out.appendChild(renderDraftClause(c));
 }
 
+const DRAFT_WELCOME =
+  '<div class="welcome">' +
+  '<p class="welcome-lede">Assemble a contract from your precedents.</p>' +
+  '<p>Choose a contract type, name the parties, and preview. DraftOS pulls the ' +
+  "required clauses from your attached sources, assembles them into a numbered " +
+  "draft, and tells you exactly what's missing or unresolved before it renders.</p>" +
+  '</div>';
+
+function resetDraftOutput() {
+  $('draft-output').innerHTML = DRAFT_WELCOME;
+  $('draft-vars').innerHTML = '';
+  $('draft-vars-field').hidden = true;
+  lastPreviewOk = false;
+  $('draft-save-btn').disabled = true;
+}
+
 $('draft-type').addEventListener('change', updateRequiredHint);
 $('draft-add-party').addEventListener('click', () => addPartyRow());
+$('draft-clear-btn').addEventListener('click', resetDraftOutput);
 
 $('draft-form').addEventListener('submit', async (e) => {
   e.preventDefault();

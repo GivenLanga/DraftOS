@@ -4,6 +4,8 @@
 
 mod docx;
 mod markdown;
+mod style;
 
-pub use docx::render_docx;
+pub use docx::{render_docx, render_docx_with_style};
 pub use markdown::render_markdown;
+pub use style::StyleDonor;

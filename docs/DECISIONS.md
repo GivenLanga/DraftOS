@@ -3,6 +3,29 @@
 Deviations from `CLAUDE.md` and notable implementation decisions, newest first.
 Each entry: date, decision, reason, alternative considered.
 
+## 2026-07-21 — Rendered DOCX inherits a precedent's styling (style donor)
+Owner: an assembled draft must look like the pack it was drawn from, not a bare
+default-Word document (the renderer shipped NO styles.xml, so Word applied
+Calibri/default spacing). Fix: `draftos-render` gains `StyleDonor` +
+`render_docx_with_style`. A donor is a real precedent `.docx` whose
+`styles.xml`, `theme1.xml`, `fontTable.xml`, `numbering.xml`, `settings.xml`
+and body-level `<w:sectPr>` (page size + margins, header/footer refs stripped)
+are copied verbatim into the output package and wired via a generated
+`document.xml.rels` + content-type overrides. The assembled body carries no
+`pStyle`, so it inherits the donor's `Normal`/docDefaults — its font, size and
+spacing then match the source exactly (verified: output default font came out
+Century Gothic, byte-identical `styles.xml` to the donor). Headings are
+deliberately rendered with **direct** bold formatting rather than the donor's
+heading styles: legal heading styles often auto-number, which would collide
+with the numbers the assembler already assigns (double numbering). The apps
+choose the donor as the on-disk `.docx` precedent that contributed the most
+clauses (from clause provenance source+file → SourceRecord.folder), falling
+back to the plain built-in path when none is a usable `.docx`. Caveat: a draft
+can pull clauses from several differently-styled files; the donor gives the
+whole document one consistent house style (the dominant contributor's), which
+is what a final contract wants anyway. `render_docx` (no donor) is unchanged
+and stays byte-compatible with its existing test.
+
 ## 2026-07-21 — Desktop app: Draft tab surfaces the Phase 2 pipeline
 The Tauri shell gains a third workbench tab, Draft, that makes deterministic
 drafting usable without the CLI. New commands: `draft_contract_types` (known

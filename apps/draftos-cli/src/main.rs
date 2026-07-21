@@ -471,6 +471,24 @@ fn print_hit(n: usize, hit: &draftos_core::ClauseHit, full: bool) {
     }
 }
 
+/// The on-disk `.docx` precedent that contributed the most clauses — used as the
+/// style donor so the rendered draft matches the pack's formatting.
+fn dominant_donor(doc: &draftos_core::LirDocument, records: &[SourceRecord]) -> Option<PathBuf> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<(String, String), usize> = HashMap::new();
+    for c in &doc.clauses {
+        if let (Some(src), Some(file)) = (&c.provenance.source, &c.provenance.file) {
+            if !file.is_empty() && file.to_ascii_lowercase().ends_with(".docx") {
+                *counts.entry((src.clone(), file.clone())).or_default() += 1;
+            }
+        }
+    }
+    let (src, file) = counts.into_iter().max_by_key(|(_, n)| *n).map(|(k, _)| k)?;
+    let rec = records.iter().find(|r| r.name.eq_ignore_ascii_case(&src))?;
+    let path = rec.folder.join(&file);
+    path.is_file().then_some(path)
+}
+
 fn run_draft(
     spec_path: &PathBuf,
     out: &PathBuf,
@@ -486,15 +504,16 @@ fn run_draft(
 
     // Open the attached sources in scope for retrieval.
     let scope = &spec.source_scope;
+    let records = db.list_sources()?;
     let mut bundles = Vec::new();
-    for rec in db.list_sources()? {
+    for rec in &records {
         if !rec.attached {
             continue;
         }
         if !scope.is_empty() && !scope.iter().any(|s| s.eq_ignore_ascii_case(&rec.name)) {
             continue;
         }
-        bundles.push(open_bundle(&rec)?);
+        bundles.push(open_bundle(rec)?);
     }
     if bundles.is_empty() {
         bail!("no attached sources in scope to draft from — attach a source first");
@@ -544,7 +563,17 @@ fn run_draft(
         .unwrap_or_default();
     match ext.as_str() {
         "docx" => {
-            let bytes = draftos_render::render_docx(doc)?;
+            // Inherit the styling of the precedent that contributed most clauses.
+            let donor = dominant_donor(doc, &records).and_then(|p| {
+                match draftos_render::StyleDonor::from_path(&p) {
+                    Ok(d) if d.is_usable() => {
+                        println!("  · styled from {}", p.display());
+                        Some(d)
+                    }
+                    _ => None,
+                }
+            });
+            let bytes = draftos_render::render_docx_with_style(doc, donor.as_ref())?;
             std::fs::write(out, bytes)?;
         }
         "md" | "markdown" => {

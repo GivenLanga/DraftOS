@@ -8,3 +8,10 @@
 .DS_Store
 *.swp
 *.rs.bk
+
+# LibreOffice/Word lock files
+.~lock.*#
+
+# Generated drafts saved into the repo root (real precedents live outside the repo)
+/*.docx
+/*.md.docx
