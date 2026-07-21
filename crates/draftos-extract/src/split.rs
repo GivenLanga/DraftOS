@@ -30,19 +30,35 @@ struct Builder {
     kind: ClauseKind,
     number: Option<String>,
     heading: Option<String>,
+    /// Original OOXML of the heading paragraph (DOCX), so the renderer can
+    /// reproduce the source heading and the numbering it carries.
+    heading_ooxml: Option<String>,
     body: Vec<String>,
     /// Original OOXML for each body paragraph (DOCX sources), parallel to the
-    /// text collected in `body`. Empty for non-DOCX. The heading paragraph is
-    /// deliberately excluded — the renderer synthesises the heading itself.
+    /// text collected in `body`. Empty for non-DOCX.
     body_ooxml: Vec<String>,
 }
 
 impl Builder {
-    fn new(kind: ClauseKind, number: Option<String>, heading: Option<String>) -> Self {
+    /// Start a clause whose heading is `para` (its text already extracted).
+    fn heading(kind: ClauseKind, number: Option<String>, heading: String, para: &draftos_core::Paragraph) -> Self {
         Builder {
             kind,
             number,
-            heading,
+            heading: Some(heading),
+            heading_ooxml: para.ooxml.clone(),
+            body: Vec::new(),
+            body_ooxml: Vec::new(),
+        }
+    }
+
+    /// Start a headingless clause (e.g. the preamble before the first heading).
+    fn headless(kind: ClauseKind) -> Self {
+        Builder {
+            kind,
+            number: None,
+            heading: None,
+            heading_ooxml: None,
             body: Vec::new(),
             body_ooxml: Vec::new(),
         }
@@ -67,6 +83,7 @@ impl Builder {
             term: None,
             body,
             ooxml: self.body_ooxml,
+            heading_ooxml: self.heading_ooxml,
             metadata: ClauseMetadata::default(),
         })
     }
@@ -91,10 +108,11 @@ pub fn split_into_clauses(doc: &ParsedDocument) -> Vec<ExtractedClause> {
                 out.extend(b.finish());
             }
             in_schedule = true;
-            current = Some(Builder::new(
+            current = Some(Builder::heading(
                 ClauseKind::Schedule,
                 None,
-                Some(text.to_string()),
+                text.to_string(),
+                para,
             ));
         } else if let Some((number, heading)) = heading_info {
             if let Some(b) = current.take() {
@@ -109,13 +127,13 @@ pub fn split_into_clauses(doc: &ParsedDocument) -> Vec<ExtractedClause> {
             } else {
                 ClauseKind::Clause
             };
-            current = Some(Builder::new(kind, number, Some(heading)));
+            current = Some(Builder::heading(kind, number, heading, para));
         } else {
             match &mut current {
                 Some(b) => b.push_body(para, text),
                 None => {
                     // Preamble before the first heading (title page, parties).
-                    let mut b = Builder::new(ClauseKind::Recital, None, None);
+                    let mut b = Builder::headless(ClauseKind::Recital);
                     b.push_body(para, text);
                     current = Some(b);
                 }

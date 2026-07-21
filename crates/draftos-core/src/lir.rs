@@ -68,6 +68,11 @@ pub struct Definition {
     pub term: String,
     pub body: Vec<Block>,
     pub provenance: Provenance,
+    /// Original OOXML of the definition's source paragraph (DOCX), so the
+    /// Definitions clause can render each entry in the precedent's house style
+    /// (and numbering) instead of a synthesised list item. Empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ooxml: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,12 +86,17 @@ pub struct LirClause {
     pub defined_terms_used: Vec<String>,
     pub provenance: Provenance,
     /// Original OOXML body paragraphs from the source precedent (DOCX), in
-    /// order, with source auto-numbering to be stripped at render. When present,
-    /// the DOCX renderer emits these — in the precedent's own house style —
-    /// instead of synthesising paragraphs from `body`. Empty for clauses drawn
-    /// from non-DOCX sources or built synthetically (e.g. Definitions).
+    /// order. When present, the DOCX renderer emits these — in the precedent's
+    /// own house style, keeping the source's numbering — instead of synthesising
+    /// paragraphs from `body`. Empty for clauses drawn from non-DOCX sources.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_ooxml: Vec<String>,
+    /// Original OOXML of the source clause's heading paragraph (DOCX). When
+    /// present, the renderer emits it verbatim so the heading's own numbering
+    /// (e.g. the multilevel list the clause hangs off) drives the clause number,
+    /// instead of a synthesised one. `None` for synthetic clauses (Definitions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heading_ooxml: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

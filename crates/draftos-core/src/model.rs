@@ -71,6 +71,11 @@ pub struct ExtractedClause {
     /// render the clause in its source's house style. Empty for other formats.
     #[serde(default)]
     pub ooxml: Vec<String>,
+    /// Original OOXML of the clause's heading paragraph (DOCX), if it had one.
+    /// Kept so the renderer can reproduce the source heading *and its numbering*
+    /// rather than synthesising a number.
+    #[serde(default)]
+    pub heading_ooxml: Option<String>,
     pub metadata: ClauseMetadata,
 }
 
@@ -104,6 +109,9 @@ pub struct ClauseHit {
     /// Original OOXML of the body paragraphs (DOCX sources); empty otherwise.
     #[serde(default)]
     pub ooxml: Vec<String>,
+    /// Original OOXML of the clause's heading paragraph (DOCX), if any.
+    #[serde(default)]
+    pub heading_ooxml: Option<String>,
     pub metadata: ClauseMetadata,
     /// Fused relevance score (higher is better).
     pub score: f64,

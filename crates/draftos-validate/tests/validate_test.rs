@@ -37,6 +37,7 @@ fn clause(number: &str, heading: &str, body: &str) -> LirClause {
         defined_terms_used: Vec::new(),
         provenance: Provenance::default(),
         source_ooxml: Vec::new(),
+        heading_ooxml: None,
     }
 }
 

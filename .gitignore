@@ -15,3 +15,5 @@
 # Generated drafts saved into the repo root (real precedents live outside the repo)
 /*.docx
 /*.md.docx
+
+#cargo run --release -p draftos-desktop

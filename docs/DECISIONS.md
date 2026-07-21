@@ -3,6 +3,39 @@
 Deviations from `CLAUDE.md` and notable implementation decisions, newest first.
 Each entry: date, decision, reason, alternative considered.
 
+## 2026-07-21 — Follow the precedent's numbering scheme, don't synthesise decimals
+The previous pass stripped source `<w:numPr>` and applied DraftOS's own "1. 2.
+3." — itself a hardcode, ignoring that each pack defines its own scheme
+(measured: the loan pack's numbering.xml has 62 abstract lists — decimal `%1.`,
+`%1.%2.%3`, upperLetter `A.`, lowerRoman `(i)`, `Annexure %1`…). OOXML numbering
+is *dynamic*: numbers are computed from a paragraph's position among others
+sharing its `numId`+`ilvl`. So the faithful fix is to keep the source `numPr`,
+carry the source's `numbering.xml` (already via StyleDonor), include the clause
+*heading* paragraphs, and let Word/LibreOffice renumber. Validated by rendering
+a reassembled draft through LibreOffice → PDF: clauses came out
+`1 / 2 / 3 / 3.1 / 3.1.1 / 3.2.1.1 / 4 / 4.1.1 …` in the pack's own decimal
+multilevel scheme, coherently renumbered for the new document order.
+
+Implementation: capture the clause heading paragraph's OOXML too
+(`ExtractedClause.heading_ooxml` → index column → `ClauseHit`/`LirClause`); the
+DOCX renderer emits the source heading verbatim (numbering intact) instead of a
+synthesised number. Synthetic clauses (Definitions) and headings for clauses
+whose heading OOXML we lack join the donor's *backbone list* — StyleDonor now
+detects `num_ids` (defined in numbering.xml) and `main_num_id` (the numId used by
+the most ilvl-0 paragraphs), and a synthesised heading is given
+`<w:numPr><w:ilvl 0/><w:numId main/></w:numPr>` so it numbers in the pack's own
+top-level format. A lifted paragraph keeps its numPr only if its numId is
+defined in the donor (else it's stripped — the list can't resolve). Definitions
+also carry each entry's source paragraph OOXML (`Definition.ooxml`, mapped by
+the body↔ooxml parallel arrays in extract). Field codes (`REF`/`PAGEREF` cross-
+references) are flattened to their cached text — unwrap `<w:fldSimple>`, drop
+the `<w:r>` runs holding `<w:fldChar>`/`<w:instrText>` — so a reference to a
+bookmark that isn't in the assembled doc shows its last value instead of
+"Error: Reference source not found". Known limitation: those cached cross-
+reference numbers are *stale* (e.g. "clause 14.1.3" for what is now 3.1.3) —
+true cross-reference re-resolution (bookmark tracking + renumber mapping) is a
+separate, larger feature.
+
 ## 2026-07-21 — Preserve original clause OOXML for true formatting fidelity
 The style-donor fix below matched the pack's *defaults* but drafts still looked
 wrong. Root cause (measured on the real pack): the source's appearance comes

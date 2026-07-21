@@ -27,19 +27,26 @@ pub fn extract(doc: &ParsedDocument, rel_path: &str) -> Vec<ExtractedClause> {
     let mut clauses = split::split_into_clauses(doc);
 
     // Second pass: harvest definitions out of clause bodies as standalone
-    // knowledge objects, and classify each clause.
+    // knowledge objects, and classify each clause. Each body paragraph lines up
+    // with its OOXML (parallel vectors), so a harvested definition can keep the
+    // source paragraph it came from — letting the Definitions clause later render
+    // in the precedent's house style.
     let mut definitions = Vec::new();
     for clause in &clauses {
-        for (term, sentence) in split::find_definitions(&clause.body) {
-            definitions.push(ExtractedClause {
-                kind: ClauseKind::Definition,
-                number: None,
-                heading: None,
-                term: Some(term),
-                body: sentence,
-                ooxml: Vec::new(),
-                metadata: ClauseMetadata::default(),
-            });
+        for (idx, para_text) in clause.body.split('\n').enumerate() {
+            for (term, sentence) in split::find_definitions(para_text) {
+                let ooxml = clause.ooxml.get(idx).cloned().into_iter().collect();
+                definitions.push(ExtractedClause {
+                    kind: ClauseKind::Definition,
+                    number: None,
+                    heading: None,
+                    term: Some(term),
+                    body: sentence,
+                    ooxml,
+                    heading_ooxml: None,
+                    metadata: ClauseMetadata::default(),
+                });
+            }
         }
     }
     clauses.append(&mut definitions);

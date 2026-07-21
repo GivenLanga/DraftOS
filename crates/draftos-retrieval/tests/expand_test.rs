@@ -13,6 +13,7 @@ fn extracted(kind: ClauseKind, heading: Option<&str>, term: Option<&str>, body: 
         term: term.map(str::to_string),
         body: body.to_string(),
         ooxml: Vec::new(),
+        heading_ooxml: None,
         metadata: ClauseMetadata::default(),
     }
 }

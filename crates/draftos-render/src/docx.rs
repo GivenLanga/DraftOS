@@ -172,17 +172,27 @@ fn build_document_xml(doc: &LirDocument, donor: Option<&StyleDonor>) -> String {
     }
 
     for c in &doc.clauses {
-        body.push_str(&heading(
-            &format!("{}. {}", c.number, c.heading),
-            HeadingKind::Section,
-            styled,
-        ));
-        // Prefer the precedent's own paragraphs (its house style) when we have
-        // them and a donor is styling the document; strip their source
-        // auto-numbering so our clause numbers are the only ones shown.
-        if styled && !c.source_ooxml.is_empty() {
+        // Heading: reproduce the precedent's own heading paragraph (with its
+        // numbering) when we have it; otherwise synthesise one — joined into the
+        // donor's list so it numbers in the pack's own scheme, not a hardcode.
+        match (styled, donor) {
+            (true, Some(d)) if c.heading_ooxml.is_some() => {
+                body.push_str(&prepare_source_paragraph(c.heading_ooxml.as_deref().unwrap(), d));
+            }
+            (true, Some(d)) => {
+                body.push_str(&synth_heading(&c.heading, d.main_num_id.as_deref()));
+            }
+            _ => body.push_str(&heading(
+                &format!("{}. {}", c.number, c.heading),
+                HeadingKind::Section,
+                styled,
+            )),
+        }
+        // Body: the precedent's own paragraphs (house style + numbering) when we
+        // have them and a donor is active; otherwise synthesise from plain text.
+        if let (true, Some(d), false) = (styled, donor, c.source_ooxml.is_empty()) {
             for p in &c.source_ooxml {
-                body.push_str(&prepare_source_paragraph(p));
+                body.push_str(&prepare_source_paragraph(p, d));
             }
         } else {
             body.push_str(&blocks_xml(&c.body, styled));
@@ -228,24 +238,96 @@ fn build_document_xml(doc: &LirDocument, donor: Option<&StyleDonor>) -> String {
     )
 }
 
-/// Prepare a lifted source paragraph for a new document:
-/// - strip the paragraph-level `<w:numPr>` so the source's own clause numbers
-///   don't show (DraftOS applies its own);
-/// - unwrap `<w:hyperlink>` elements, keeping their text but dropping the link —
-///   its `r:id` points at a relationship in the source package we don't carry,
-///   which would otherwise dangle;
-/// - drop embedded drawings/objects (`<w:drawing>`, `<w:pict>`, `<w:object>`),
-///   whose `r:embed`/`r:id` media parts we likewise don't carry.
-///
-/// Everything that drives the *look* — the paragraph style, direct run fonts,
-/// indentation, spacing and justification — is kept, so the clause renders in
-/// its precedent's house style.
-fn prepare_source_paragraph(p: &str) -> String {
-    let mut out = strip_element(p, "<w:numPr", "</w:numPr>");
+/// Prepare a lifted source paragraph for a new document. Keeps everything that
+/// drives the *look and numbering* — paragraph style, direct run fonts, indent,
+/// spacing, justification, and the `<w:numPr>` list membership — so the pack's
+/// own numbering scheme (decimal, `(a)`, roman…) renders exactly. It only
+/// removes what would break or dangle in the new package:
+/// - a `<w:numPr>` whose `w:numId` isn't defined in the donor's numbering.xml
+///   (its list definition is absent, so it can't resolve);
+/// - `<w:hyperlink>` wrappers (kept: their text; dropped: the `r:id` link);
+/// - embedded drawings/objects (`<w:drawing>/<w:pict>/<w:object>`) — media we
+///   don't carry;
+/// - complex/simple fields (`REF` cross-references etc.) flattened to their last
+///   cached text, so they don't render as "Error: Reference source not found".
+fn prepare_source_paragraph(p: &str, donor: &StyleDonor) -> String {
+    let mut out = p.to_string();
+    // Drop a numPr only when its list definition isn't present.
+    if let Some(numid) = num_id_of(&out) {
+        if !donor.num_ids.contains(&numid) {
+            out = strip_element(&out, "<w:numPr", "</w:numPr>");
+        }
+    }
     out = strip_element(&out, "<w:drawing", "</w:drawing>");
     out = strip_element(&out, "<w:pict", "</w:pict>");
     out = strip_element(&out, "<w:object", "</w:object>");
+    out = flatten_fields(&out);
     unwrap_element(&out, "w:hyperlink")
+}
+
+/// The `w:numId` referenced by a paragraph's `<w:numPr>`, if any.
+fn num_id_of(p: &str) -> Option<String> {
+    let np = between(p, "<w:numPr", "</w:numPr>")?;
+    let i = np.find("<w:numId")?;
+    let v = np[i..].find("w:val=\"")? + i + "w:val=\"".len();
+    let end = np[v..].find('"')? + v;
+    Some(np[v..end].to_string())
+}
+
+fn between<'a>(xml: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let s = xml.find(open)?;
+    let e = xml[s..].find(close)? + s;
+    Some(&xml[s..e])
+}
+
+/// Flatten Word field codes to their cached result text: unwrap `<w:fldSimple>`
+/// (keep inner runs) and drop the `<w:r>` runs that carry `<w:fldChar>` or
+/// `<w:instrText>` (the field machinery), leaving the last-rendered text. This
+/// stops re-computable references (REF/PAGEREF…) showing an error when the
+/// bookmark they point at isn't in the assembled document.
+fn flatten_fields(p: &str) -> String {
+    let mut out = unwrap_element(p, "w:fldSimple");
+    out = drop_runs_containing(&out, "<w:fldChar");
+    drop_runs_containing(&out, "<w:instrText")
+}
+
+/// Remove whole `<w:r>…</w:r>` runs that contain `needle`.
+fn drop_runs_containing(s: &str, needle: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(open) = rest.find("<w:r>").or_else(|| rest.find("<w:r ")) {
+        let (before, from_open) = rest.split_at(open);
+        out.push_str(before);
+        match from_open.find("</w:r>") {
+            Some(close_rel) => {
+                let end = close_rel + "</w:r>".len();
+                let run = &from_open[..end];
+                if !run.contains(needle) {
+                    out.push_str(run);
+                }
+                rest = &from_open[end..];
+            }
+            None => {
+                out.push_str(from_open);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Synthesise a clause heading paragraph. When the donor exposes a backbone
+/// list (`main_num_id`), the heading joins it at level 0 so it auto-numbers in
+/// the pack's own scheme; otherwise it falls back to bold text (no number).
+fn synth_heading(text: &str, main_num_id: Option<&str>) -> String {
+    match main_num_id {
+        Some(id) => format!(
+            r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="{id}"/></w:numPr><w:spacing w:before="200" w:after="80"/><w:keepNext/><w:rPr><w:b/></w:rPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#,
+            esc(text)
+        ),
+        None => heading(text, HeadingKind::Section, true),
+    }
 }
 
 /// Remove an element's open and close tags but keep its inner content
@@ -405,14 +487,48 @@ fn esc(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+
+    fn donor_with(num_ids: &[&str]) -> StyleDonor {
+        StyleDonor {
+            num_ids: num_ids.iter().map(|s| s.to_string()).collect::<HashSet<_>>(),
+            ..StyleDonor::default()
+        }
+    }
 
     #[test]
-    fn prepare_strips_numbering_keeps_style_and_dissolves_hyperlinks() {
+    fn keeps_numbering_when_list_is_defined_and_dissolves_hyperlinks() {
         let p = r#"<w:p><w:pPr><w:pStyle w:val="Clause2Sub"/><w:numPr><w:ilvl w:val="1"/><w:numId w:val="51"/></w:numPr></w:pPr><w:hyperlink w:history="1" r:id="Rabc"><w:r><w:t>see clause 8</w:t></w:r></w:hyperlink></w:p>"#;
-        let out = prepare_source_paragraph(p);
-        assert!(!out.contains("<w:numPr"), "numbering removed: {out}");
+        let out = prepare_source_paragraph(p, &donor_with(&["51"]));
+        assert!(out.contains("<w:numPr"), "numbering kept when 51 is defined: {out}");
         assert!(out.contains(r#"w:val="Clause2Sub""#), "style kept");
         assert!(!out.contains("<w:hyperlink") && !out.contains("r:id"), "hyperlink dissolved: {out}");
         assert!(out.contains("see clause 8"), "link text kept");
+    }
+
+    #[test]
+    fn strips_numbering_when_list_is_not_defined() {
+        let p = r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="99"/></w:numPr></w:pPr><w:r><w:t>x</w:t></w:r></w:p>"#;
+        let out = prepare_source_paragraph(p, &donor_with(&["51"]));
+        assert!(!out.contains("<w:numPr"), "undefined numId 99 stripped: {out}");
+    }
+
+    #[test]
+    fn flattens_ref_field_to_cached_text() {
+        // Complex field: begin / instrText / separate / cached "2" / end.
+        let p = r#"<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> REF _Ref1 \h </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>2</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>"#;
+        let out = prepare_source_paragraph(p, &donor_with(&[]));
+        assert!(!out.contains("fldChar") && !out.contains("instrText"), "field machinery gone: {out}");
+        assert!(out.contains("<w:t>2</w:t>"), "cached result kept: {out}");
+    }
+
+    #[test]
+    fn synth_heading_joins_donor_list() {
+        let h = synth_heading("Definitions", Some("51"));
+        assert!(h.contains(r#"<w:numId w:val="51"/>"#) && h.contains("Definitions"));
+        // No backbone list → a bold heading with no number, and no numPr.
+        let fallback = synth_heading("X", None);
+        assert!(fallback.contains("<w:b/>") && fallback.contains("X"));
+        assert!(!fallback.contains("<w:numPr"));
     }
 }

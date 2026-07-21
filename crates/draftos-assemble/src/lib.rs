@@ -107,6 +107,7 @@ pub fn assemble(
                     term,
                     body: text_to_blocks(&substitute(&hit.body, vars)),
                     provenance: provenance(&hit),
+                    ooxml: hit.ooxml.iter().map(|x| substitute(x, vars)).collect(),
                 });
             }
         }
@@ -135,8 +136,9 @@ pub fn assemble(
             provenance: provenance(hit),
             body: blocks,
             // Carry the precedent's original paragraph XML so the renderer can
-            // reproduce its house style; substitute variables into it too.
+            // reproduce its house style and numbering; substitute variables too.
             source_ooxml: hit.ooxml.iter().map(|x| substitute(x, vars)).collect(),
+            heading_ooxml: hit.heading_ooxml.as_ref().map(|x| substitute(x, vars)),
         });
         report
             .filled
@@ -223,6 +225,9 @@ fn candidate_definitions(
 
 fn build_definitions_clause(number: u32, definitions: &[Definition]) -> LirClause {
     let items: Vec<Vec<Block>> = definitions.iter().map(|d| d.body.clone()).collect();
+    // Carry each definition's source paragraph OOXML so the styled renderer can
+    // reproduce the pack's house style for the Definitions clause too.
+    let source_ooxml: Vec<String> = definitions.iter().flat_map(|d| d.ooxml.clone()).collect();
     LirClause {
         id: draftos_core::new_id(),
         number: number.to_string(),
@@ -234,7 +239,9 @@ fn build_definitions_clause(number: u32, definitions: &[Definition]) -> LirClaus
         cross_refs: Vec::new(),
         defined_terms_used: definitions.iter().map(|d| d.term.clone()).collect(),
         provenance: Provenance::default(),
-        source_ooxml: Vec::new(),
+        source_ooxml,
+        // Synthetic heading — the renderer numbers it into the donor's list.
+        heading_ooxml: None,
     }
 }
 

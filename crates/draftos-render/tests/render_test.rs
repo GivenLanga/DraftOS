@@ -22,12 +22,14 @@ fn sample_doc() -> LirDocument {
         term: "Confidential Information".into(),
         body: vec![Block::para("\"Confidential Information\" means all information disclosed.")],
         provenance: Provenance::default(),
+        ooxml: Vec::new(),
     });
     doc.clauses.push(LirClause {
         id: draftos_core::new_id(),
         number: "1".into(),
         heading: "Confidentiality".into(),
         source_ooxml: Vec::new(),
+        heading_ooxml: None,
         body: vec![
             Block::Paragraph {
                 runs: vec![
