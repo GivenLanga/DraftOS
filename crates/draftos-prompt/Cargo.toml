@@ -1,0 +1,10 @@
+[package]
+name = "draftos-prompt"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+draftos-models = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,11 @@
+[package]
+name = "draftos-parse"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
+pdf-extract = { workspace = true }
+regex = { workspace = true }

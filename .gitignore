@@ -1,0 +1,10 @@
+# Rust build output
+/target
+
+# Tauri generated schemas (regenerated on build)
+/apps/draftos-desktop/gen/schemas/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*.rs.bk

@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/draftos-core",
+    "crates/draftos-parse",
+    "crates/draftos-extract",
+    "crates/draftos-embed",
+    "crates/draftos-index",
+    "crates/draftos-storage",
+    "crates/draftos-ingest",
+    "crates/draftos-retrieval",
+    "crates/draftos-rules",
+    "crates/draftos-assemble",
+    "crates/draftos-validate",
+    "crates/draftos-render",
+    "crates/draftos-models",
+    "crates/draftos-prompt",
+    "apps/draftos-cli",
+    "apps/draftos-desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+draftos-core = { path = "crates/draftos-core" }
+draftos-parse = { path = "crates/draftos-parse" }
+draftos-extract = { path = "crates/draftos-extract" }
+draftos-embed = { path = "crates/draftos-embed" }
+draftos-index = { path = "crates/draftos-index" }
+draftos-storage = { path = "crates/draftos-storage" }
+draftos-ingest = { path = "crates/draftos-ingest" }
+draftos-retrieval = { path = "crates/draftos-retrieval" }
+draftos-rules = { path = "crates/draftos-rules" }
+draftos-assemble = { path = "crates/draftos-assemble" }
+draftos-validate = { path = "crates/draftos-validate" }
+draftos-render = { path = "crates/draftos-render" }
+draftos-models = { path = "crates/draftos-models" }
+draftos-prompt = { path = "crates/draftos-prompt" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sqlite-vec = "0.1"
+zip = "2"
+quick-xml = "0.37"
+pdf-extract = "0.8"
+sha2 = "0.10"
+walkdir = "2"
+notify = "7"
+notify-debouncer-mini = "0.5"
+directories = "5"
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ureq = { version = "2", features = ["json"] }
+keyring = "2"
+
+[profile.release]
+lto = "thin"

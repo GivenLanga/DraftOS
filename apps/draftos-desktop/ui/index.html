@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DraftOS</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <aside class="library">
+    <header class="wordmark">
+      <h1>Draft<span>OS</span></h1>
+      <p class="tagline">Legal knowledge engine</p>
+    </header>
+
+    <section class="library-list">
+      <h2 class="section-label">Library</h2>
+      <ul id="sources"></ul>
+      <p id="library-empty" class="empty-note" hidden>
+        No sources yet. Attach a folder of contracts and every clause in it
+        becomes searchable.
+      </p>
+    </section>
+
+    <section class="add-source">
+      <h2 class="section-label">Attach a folder</h2>
+      <form id="add-form">
+        <div class="folder-row">
+          <input id="add-folder" type="text" placeholder="Choose or paste a folder path…"
+                 spellcheck="false" autocomplete="off" />
+          <button type="button" id="browse-folder" class="ghost">Browse…</button>
+        </div>
+        <input id="add-name" type="text" placeholder="Name, e.g. banking"
+               spellcheck="false" autocomplete="off" />
+        <button type="submit">Attach &amp; index</button>
+      </form>
+      <p class="hint">DraftOS watches the folder — files you save into it are
+        indexed automatically.</p>
+    </section>
+
+    <section class="model-box">
+      <h2 class="section-label">Model</h2>
+      <p id="model-summary" class="model-summary">No model — search &amp; drafting work fully offline.</p>
+      <details id="model-details">
+        <summary>Configure</summary>
+        <form id="model-form">
+          <select id="model-adapter">
+            <option value="ollama">Ollama (local)</option>
+            <option value="vllm">vLLM / llama.cpp (local)</option>
+            <option value="anthropic">Anthropic — cloud</option>
+            <option value="openai">OpenAI — cloud</option>
+            <option value="deepseek">DeepSeek — cloud</option>
+            <option value="mistral">Mistral — cloud</option>
+            <option value="qwen">Qwen — cloud</option>
+          </select>
+          <input id="model-name" type="text" placeholder="Model id (blank = default)"
+                 spellcheck="false" autocomplete="off" />
+          <input id="model-url" type="text" placeholder="Endpoint URL (optional)"
+                 spellcheck="false" autocomplete="off" />
+          <div class="model-buttons">
+            <button type="submit">Use this model</button>
+            <button type="button" id="model-clear" class="ghost">Unset</button>
+          </div>
+          <input id="model-key" type="password" placeholder="API key (stored in OS keychain)"
+                 autocomplete="off" />
+          <button type="button" id="model-key-save" class="ghost">Store key</button>
+        </form>
+      </details>
+    </section>
+
+    <footer class="status" id="status" aria-live="polite"></footer>
+  </aside>
+
+  <main class="workbench">
+    <nav class="tabs" role="tablist">
+      <button id="tab-search" class="tab active" role="tab" aria-selected="true">Search</button>
+      <button id="tab-draft" class="tab" role="tab" aria-selected="false">Draft</button>
+      <button id="tab-assistant" class="tab" role="tab" aria-selected="false">Assistant</button>
+    </nav>
+
+    <div id="view-search">
+      <form id="search-form" class="search-bar">
+        <input id="query" type="search" placeholder="Find a clause — try: termination for material breach"
+               spellcheck="false" autocomplete="off" autofocus />
+        <button type="submit">Search</button>
+      </form>
+
+      <div class="filters">
+        <select id="filter-kind" title="Kind">
+          <option value="">Any kind</option>
+          <option value="clause">Clauses</option>
+          <option value="definition">Definitions</option>
+          <option value="schedule">Schedules</option>
+          <option value="recital">Recitals</option>
+        </select>
+        <select id="filter-type" title="Clause type">
+          <option value="">Any clause type</option>
+        </select>
+        <select id="filter-source" title="Source">
+          <option value="">All sources</option>
+        </select>
+      </div>
+
+      <section id="results" class="results">
+        <div class="welcome" id="welcome">
+          <p class="welcome-lede">Your precedents, one query away.</p>
+          <p>Search across every attached source. Results show the exact clause,
+             where it came from, and how it was classified — nothing is generated,
+             everything is retrieved.</p>
+        </div>
+      </section>
+    </div>
+
+    <div id="view-draft" hidden>
+      <div class="draft-layout">
+        <form id="draft-form" class="draft-form">
+          <label class="field">
+            <span>Contract type</span>
+            <select id="draft-type"></select>
+          </label>
+          <label class="field" id="draft-custom-field" hidden>
+            <span>Custom type</span>
+            <input id="draft-custom" type="text" placeholder="e.g. Distribution Agreement"
+                   spellcheck="false" autocomplete="off" />
+          </label>
+          <p id="draft-required" class="draft-required"></p>
+
+          <label class="field">
+            <span>Title <em>(optional)</em></span>
+            <input id="draft-title" type="text" placeholder="Defaults to the contract type"
+                   spellcheck="false" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Jurisdiction</span>
+            <input id="draft-jurisdiction" type="text" value="South Africa"
+                   spellcheck="false" autocomplete="off" />
+          </label>
+
+          <fieldset class="field">
+            <legend>Parties</legend>
+            <div id="draft-parties"></div>
+            <button type="button" id="draft-add-party" class="ghost small">+ Add party</button>
+          </fieldset>
+
+          <fieldset class="field">
+            <legend>Draw from <em>(none ticked = all attached)</em></legend>
+            <div id="draft-scope" class="draft-scope"></div>
+          </fieldset>
+
+          <fieldset class="field" id="draft-vars-field" hidden>
+            <legend>Variables to fill</legend>
+            <div id="draft-vars"></div>
+          </fieldset>
+
+          <div class="draft-actions">
+            <button type="submit" id="draft-preview-btn">Preview draft</button>
+            <button type="button" id="draft-save-btn" disabled>Save DOCX…</button>
+          </div>
+          <p class="hint">Drafting is deterministic — clauses are retrieved from your
+             precedents, ordered, numbered and cross-referenced by rule. Nothing is
+             invented. Validation errors block the DOCX until you fix them.</p>
+        </form>
+
+        <section id="draft-output" class="draft-output">
+          <div class="welcome">
+            <p class="welcome-lede">Assemble a contract from your precedents.</p>
+            <p>Choose a contract type, name the parties, and preview. DraftOS pulls the
+               required clauses from your attached sources, assembles them into a numbered
+               draft, and tells you exactly what's missing or unresolved before it renders.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="view-assistant" hidden>
+      <div id="privacy-banner" class="privacy-banner local">Local model — nothing leaves this machine.</div>
+      <form id="ask-form" class="search-bar">
+        <input id="ask-input" type="text" placeholder="Ask about your precedents — try: what notice period applies to termination?"
+               spellcheck="false" autocomplete="off" />
+        <button type="submit" id="ask-button">Ask</button>
+      </form>
+      <p class="hint">Answers come only from your attached sources, with citations.
+         The model never drafts — it explains what your precedents already say.</p>
+      <section id="answer" class="results"></section>
+    </div>
+  </main>
+
+  <script src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+[package]
+name = "draftos-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "draftos"
+path = "src/main.rs"
+
+[dependencies]
+draftos-core = { workspace = true }
+draftos-parse = { workspace = true }
+draftos-extract = { workspace = true }
+draftos-embed = { workspace = true }
+draftos-index = { workspace = true }
+draftos-storage = { workspace = true }
+draftos-ingest = { workspace = true }
+draftos-retrieval = { workspace = true }
+draftos-assemble = { workspace = true }
+draftos-validate = { workspace = true }
+draftos-render = { workspace = true }
+draftos-models = { workspace = true }
+draftos-prompt = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+directories = { workspace = true }
+serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }

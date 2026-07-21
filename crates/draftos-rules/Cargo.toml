@@ -1,0 +1,7 @@
+[package]
+name = "draftos-rules"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }

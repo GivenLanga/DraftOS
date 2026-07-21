@@ -1,0 +1,12 @@
+[package]
+name = "draftos-assemble"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+draftos-rules = { workspace = true }
+draftos-retrieval = { workspace = true }
+draftos-index = { workspace = true }
+draftos-embed = { workspace = true }
+regex = { workspace = true }

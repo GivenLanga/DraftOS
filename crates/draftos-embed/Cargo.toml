@@ -1,0 +1,8 @@
+[package]
+name = "draftos-embed"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+anyhow = { workspace = true }

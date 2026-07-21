@@ -1,0 +1,7 @@
+[package]
+name = "draftos-validate"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }

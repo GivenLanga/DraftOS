@@ -1,0 +1,9 @@
+[package]
+name = "draftos-retrieval"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+draftos-embed = { workspace = true }
+draftos-index = { workspace = true }

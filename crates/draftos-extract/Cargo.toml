@@ -1,0 +1,8 @@
+[package]
+name = "draftos-extract"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+regex = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "draftos-ingest"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+draftos-core = { workspace = true }
+draftos-parse = { workspace = true }
+draftos-extract = { workspace = true }
+draftos-embed = { workspace = true }
+draftos-index = { workspace = true }
+sha2 = { workspace = true }
+walkdir = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+tracing = { workspace = true }

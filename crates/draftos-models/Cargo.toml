@@ -1,0 +1,17 @@
+[package]
+name = "draftos-models"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["anthropic", "openai-compat"]
+anthropic = []
+openai-compat = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ureq = { workspace = true }
+keyring = { workspace = true }
